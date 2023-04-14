@@ -1,6 +1,6 @@
 package shared
 
-import "github.com/thalesfsp/etler/state"
+import "github.com/thalesfsp/status"
 
 // IMeta defines what a `Processor` must do.
 type IMeta[C any] interface {
@@ -11,8 +11,8 @@ type IMeta[C any] interface {
 	GetName() string
 
 	// GetState returns the `State` of the processor.
-	GetState() state.State
+	GetState() status.Status
 
 	// SetState sets the `State` of the processor.
-	SetState(state state.State)
+	SetState(state status.Status)
 }

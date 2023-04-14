@@ -55,8 +55,13 @@ func (a *CSV[C]) Upsert(ctx context.Context, v []C, o ...option.Func) error {
 
 // New returns a new JSON adapter.
 func New[C any](content []byte) (adapter.IAdapter[C], error) {
+	a, err := adapter.New("csv", "csv adapter")
+	if err != nil {
+		return nil, err
+	}
+
 	return &CSV[C]{
-		Adapter: adapter.New("csv", "csv adapter"),
+		Adapter: a,
 
 		Content: content,
 	}, nil

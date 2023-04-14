@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/thalesfsp/etler/shared"
-	"github.com/thalesfsp/etler/state"
+	"github.com/thalesfsp/status"
 )
 
 // IProcessor defines what a `Processor` must do.
@@ -27,7 +27,7 @@ type Processor[C any] struct {
 	Func shared.Run[C] `json:"-"`
 
 	// State of the processor.
-	State state.State `json:"state"`
+	State status.Status `json:"state"`
 }
 
 // GetDescription returns the `Description` of the processor.
@@ -41,12 +41,12 @@ func (p *Processor[C]) GetName() string {
 }
 
 // GetState returns the `State` of the processor.
-func (p *Processor[C]) GetState() state.State {
+func (p *Processor[C]) GetState() status.Status {
 	return p.State
 }
 
 // SetState sets the `State` of the processor.
-func (p *Processor[C]) SetState(state state.State) {
+func (p *Processor[C]) SetState(state status.Status) {
 	p.State = state
 }
 
@@ -61,6 +61,6 @@ func New[C any](name string, description string, fn shared.Run[C]) IProcessor[C]
 		Description: description,
 		Func:        fn,
 		Name:        name,
-		State:       state.Stopped,
+		State:       status.Stopped,
 	}
 }

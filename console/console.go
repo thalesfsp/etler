@@ -8,6 +8,7 @@ import (
 
 	"github.com/thalesfsp/etler/adapter"
 	"github.com/thalesfsp/etler/option"
+	"github.com/thalesfsp/validation"
 )
 
 // Console definition.
@@ -53,11 +54,20 @@ func (c *Console[C]) Upsert(ctx context.Context, v []C, o ...option.Func) error 
 }
 
 // New creates a new Console adapter.
-func New[C any]() adapter.IAdapter[C] {
-	return &Console[C]{
-		adapter.New(
-			"Console",
-			"Reads and writes data to and from the console.",
-		),
+func New[C any]() (adapter.IAdapter[C], error) {
+	a, err := adapter.New(
+		"Console",
+		"Reads and writes data to and from the console.",
+	)
+	if err != nil {
+		return nil, err
 	}
+
+	c := &Console[C]{a}
+
+	if err := validation.Validate(c); err != nil {
+		return nil, err
+	}
+
+	return c, nil
 }

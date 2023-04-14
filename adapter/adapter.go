@@ -4,12 +4,13 @@ import (
 	"context"
 
 	"github.com/thalesfsp/etler/option"
+	"github.com/thalesfsp/validation"
 )
 
 // Adapter definition.
 type Adapter struct {
 	// Name of the adapter.
-	Name string `json:"name"`
+	Name string `json:"name" validate:"required"`
 
 	// Description of the adapter.
 	Description string `json:"description"`
@@ -46,9 +47,15 @@ func (a *Adapter) GetName() string {
 }
 
 // New creates a new `Adapter`.
-func New(name, description string) *Adapter {
-	return &Adapter{
+func New(name, description string) (*Adapter, error) {
+	a := &Adapter{
 		Name:        name,
 		Description: description,
 	}
+
+	if err := validation.Validate(a); err != nil {
+		return nil, err
+	}
+
+	return a, nil
 }

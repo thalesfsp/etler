@@ -9,7 +9,7 @@ import (
 	"github.com/thalesfsp/etler/adapter"
 	"github.com/thalesfsp/etler/processor"
 	"github.com/thalesfsp/etler/shared"
-	"github.com/thalesfsp/etler/state"
+	"github.com/thalesfsp/status"
 )
 
 // Number is a simple struct to be used in the tests.
@@ -55,7 +55,7 @@ type Pipeline[C any] struct {
 	Stages []Stage[C] `json:"stages"`
 
 	// State of the pipeline.
-	State state.State `json:"state"`
+	State status.Status `json:"state"`
 }
 
 // GetDescription returns the `Description` of the processor.
@@ -69,12 +69,12 @@ func (p *Pipeline[C]) GetName() string {
 }
 
 // GetState returns the `State` of the processor.
-func (p *Pipeline[C]) GetState() state.State {
+func (p *Pipeline[C]) GetState() status.Status {
 	return p.State
 }
 
 // SetState sets the `State` of the processor.
-func (p *Pipeline[C]) SetState(state state.State) {
+func (p *Pipeline[C]) SetState(state status.Status) {
 	p.State = state
 }
 
@@ -129,6 +129,6 @@ func New[C any](
 		Name:     name,
 		Progress: 0,
 		Stages:   stages,
-		State:    state.Stopped,
+		State:    status.Stopped,
 	}
 }
