@@ -4,8 +4,7 @@ go 1.19
 
 require (
 	github.com/google/uuid v1.3.0
-	github.com/jszwec/csvutil v1.8.0
-	github.com/thalesfsp/status v1.0.4
+	github.com/thalesfsp/status v1.0.5
 	github.com/thalesfsp/validation v0.0.1
 )
 

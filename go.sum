@@ -12,8 +12,6 @@ github.com/go-playground/validator/v10 v10.12.0 h1:E4gtWgxWxp8YSxExrQFv5BpCahla0
 github.com/go-playground/validator/v10 v10.12.0/go.mod h1:hCAPuzYvKdP33pxWa+2+6AIKXEKqjIUyqsNCtbsSJrA=
 github.com/google/uuid v1.3.0 h1:t6JiXgmwXMjEs8VusXIJk2BXHsn+wx8BZdTaoZ5fu7I=
 github.com/google/uuid v1.3.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/jszwec/csvutil v1.8.0 h1:G7vS2LGdpZZDH1HmHeNbxOaJ/ZnJlpwGFvOkTkJzzNk=
-github.com/jszwec/csvutil v1.8.0/go.mod h1:/E4ONrmGkwmWsk9ae9jpXnv9QT8pLHEPcCirMFhxG9I=
 github.com/leodido/go-urn v1.2.3 h1:6BE2vPT0lqoz3fmOesHZiaiFh7889ssCo2GMvLCfiuA=
 github.com/leodido/go-urn v1.2.3/go.mod h1:7ZrI8mTSeBSHl/UaRyKQW1qZeMgak41ANeCNaVckg+4=
 github.com/mattn/go-runewidth v0.0.10/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRCM46jaSJTDAk=
@@ -31,8 +29,8 @@ github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
 github.com/stretchr/testify v1.8.2 h1:+h33VjcLVPDHtOdpUCuF+7gSuG3yGIftsP1YvFihtJ8=
 github.com/stretchr/testify v1.8.2/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
-github.com/thalesfsp/status v1.0.4 h1:wBR/Mum9av4l62IoSFqzG9/Bxo6f/+NBMZ286bZvv7k=
-github.com/thalesfsp/status v1.0.4/go.mod h1:ZwlaaU4tPETPq/wf3bsS/sVqSQpMUPMK7iTqkSSJqVY=
+github.com/thalesfsp/status v1.0.5 h1:4ztZcNZkBryqI4/kWE5eF6+jWve3Zxmxy9ds10a3vsk=
+github.com/thalesfsp/status v1.0.5/go.mod h1:ZwlaaU4tPETPq/wf3bsS/sVqSQpMUPMK7iTqkSSJqVY=
 github.com/thalesfsp/validation v0.0.1 h1:6IjZTq/RMACOZQjHWzNVxyzLvUYe7i/wWfyfiBvApJg=
 github.com/thalesfsp/validation v0.0.1/go.mod h1:fPQMxD7yKJowC6emuD3PTAVB7iQjh6u90TFux81MjSs=
 golang.org/x/crypto v0.8.0 h1:pd9TJtTueMTVQXzk8E2XESSMQDj/U7OUu0PqJqPXQjQ=

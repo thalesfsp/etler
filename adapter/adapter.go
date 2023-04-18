@@ -22,7 +22,7 @@ type IDAO[C any] interface {
 	Read(ctx context.Context, o ...option.Func) ([]C, error)
 
 	// Upsert write to the data source.
-	Upsert(ctx context.Context, v []C, o ...option.Func) error
+	Upsert(ctx context.Context, v []C, o ...option.Func) ([]byte, error)
 }
 
 // IAdapter defines what an `Adapter` must do.
