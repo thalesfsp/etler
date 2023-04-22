@@ -19,23 +19,23 @@ type Number struct {
 }
 
 // Stage definition.
-type Stage[C any] struct {
+type Stage[In any, Out any] struct {
 	// Concurrent determines whether the stage should be run concurrently.
 	Concurrent bool `json:"concurrent"`
 
 	// Processors to be run in the stage.
-	Processors []processor.IProcessor[C] `json:"processors"`
+	Processors []processor.IProcessor[In, Out] `json:"processors"`
 }
 
 // IPipeline defines what a `Pipeline` must do.
-type IPipeline[C any] interface {
-	shared.IMeta[C]
+type IPipeline[In any, Out any] interface {
+	shared.IMeta[In]
 
-	Run(ctx context.Context, in []C) (out []C, err error)
+	Run(ctx context.Context, in []In) (out []Out, err error)
 }
 
 // Pipeline definition.
-type Pipeline[C any] struct {
+type Pipeline[In any, Out any] struct {
 	// Description of the processor.
 	Description string `json:"description"`
 
@@ -43,7 +43,7 @@ type Pipeline[C any] struct {
 	Name string `json:"name"`
 
 	// Adapters to be used in the pipeline.
-	Adapters map[string]adapter.IAdapter[C] `json:"adapters"`
+	Adapters map[string]adapter.IAdapter[In] `json:"adapters"`
 
 	// Control the pipeline.
 	Control chan string `json:"-"`
@@ -52,37 +52,34 @@ type Pipeline[C any] struct {
 	Progress int `json:"progress"`
 
 	// Stages to be used in the pipeline.
-	Stages []Stage[C] `json:"stages"`
+	Stages []Stage[In, Out] `json:"stages"`
 
 	// State of the pipeline.
 	State status.Status `json:"state"`
 }
 
 // GetDescription returns the `Description` of the processor.
-func (p *Pipeline[C]) GetDescription() string {
+func (p *Pipeline[In, Out]) GetDescription() string {
 	return p.Description
 }
 
 // GetName returns the `Name` of the processor.
-func (p *Pipeline[C]) GetName() string {
+func (p *Pipeline[In, Out]) GetName() string {
 	return p.Name
 }
 
 // GetState returns the `State` of the processor.
-func (p *Pipeline[C]) GetState() status.Status {
+func (p *Pipeline[In, Out]) GetState() status.Status {
 	return p.State
 }
 
 // SetState sets the `State` of the processor.
-func (p *Pipeline[C]) SetState(state status.Status) {
+func (p *Pipeline[In, Out]) SetState(state status.Status) {
 	p.State = state
 }
 
 // Run the pipeline.
-func (p *Pipeline[C]) Run(ctx context.Context, in []C) (out []C, err error) {
-	// Set the input of the first stage to be the input of the pipeline.
-	out = in
-
+func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) (out []Out, err error) {
 	// Iterate through the stages, passing the output of each stage
 	// as the input of the next stage.
 	for _, s := range p.Stages {
@@ -95,9 +92,9 @@ func (p *Pipeline[C]) Run(ctx context.Context, in []C) (out []C, err error) {
 				// Start a goroutine to run the stage.
 				//
 				// TODO: Make it boundaded.
-				go func(ctx context.Context, p processor.IProcessor[C]) {
+				go func(ctx context.Context, p processor.IProcessor[In, Out]) {
 					// Process the data.
-					out, err = p.Run(ctx, out)
+					out, err = p.Run(ctx, in)
 
 					wg.Done()
 				}(ctx, p)
@@ -107,7 +104,7 @@ func (p *Pipeline[C]) Run(ctx context.Context, in []C) (out []C, err error) {
 		} else {
 			// Process the data sequentially.
 			for _, p := range s.Processors {
-				out, err = p.Run(ctx, out)
+				out, err = p.Run(ctx, in)
 				if err != nil {
 					return out, err
 				}
@@ -119,12 +116,12 @@ func (p *Pipeline[C]) Run(ctx context.Context, in []C) (out []C, err error) {
 }
 
 // New returns a new pipeline.
-func New[C any](
+func New[In any, Out any](
 	name string,
 	description string,
-	stages []Stage[C],
-) IPipeline[C] {
-	return &Pipeline[C]{
+	stages []Stage[In, Out],
+) IPipeline[In, Out] {
+	return &Pipeline[In, Out]{
 		Control:  make(chan string),
 		Name:     name,
 		Progress: 0,
