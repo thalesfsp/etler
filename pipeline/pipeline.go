@@ -6,9 +6,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/thalesfsp/etler/adapter"
-	"github.com/thalesfsp/etler/processor"
-	"github.com/thalesfsp/etler/shared"
+	"github.com/WreckingBallStudioLabs/etler/adapter"
+	"github.com/WreckingBallStudioLabs/etler/processor"
+	"github.com/WreckingBallStudioLabs/etler/shared"
 	"github.com/thalesfsp/status"
 )
 
