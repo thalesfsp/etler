@@ -3,7 +3,7 @@ package processor
 import (
 	"context"
 
-	"github.com/WreckingBallStudioLabs/etler/shared"
+	"github.com/thalesfsp/etler/shared"
 	"github.com/thalesfsp/status"
 )
 

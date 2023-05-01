@@ -1,4 +1,4 @@
-module github.com/WreckingBallStudioLabs/etler
+module github.com/thalesfsp/etler
 
 go 1.19
 

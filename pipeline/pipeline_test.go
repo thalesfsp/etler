@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/WreckingBallStudioLabs/etler/processor"
+	"github.com/thalesfsp/etler/processor"
 )
 
 type TestUser struct {
