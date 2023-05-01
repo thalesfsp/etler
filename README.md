@@ -13,7 +13,7 @@ This is an ETL (extract, transform, load) pipeline project that allows developer
 To use the pipeline in your project, you will need to define the stages that make up your pipeline. A stage is a function that transforms a slice of values of any type and returns the transformed slice and any errors that occurred during processing.
 
 ```go
-type Stage[C any] func(in []C) (out []C, err error)
+type Stage[In any, Out any] func(in []In) (out []Out, err error)
 ```
 
 You can then create a pipeline by calling the Pipeline function and passing in the input data, a flag to indicate whether the stages should be run concurrently or sequentially, and the stages to be run:

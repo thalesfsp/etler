@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thalesfsp/etler/processor"
+	"github.com/WreckingBallStudioLabs/etler/processor"
 )
 
 type TestUser struct {
@@ -60,10 +60,10 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	p := New(
 		"User Enhancer",
 		"Enhances user data",
-		[]Stage[TestUser]{
+		[]Stage[TestUser, TestUser]{
 			{
 				Concurrent: false,
-				Processors: []processor.IProcessor[TestUser]{double, square},
+				Processors: []processor.IProcessor[TestUser, TestUser]{double, square},
 			},
 		},
 	)
@@ -100,11 +100,11 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 		t.Fatalf("Unexpected number of out: expected=2, got=%d", len(processedRecords))
 	}
 
-	if processedRecords[0].Name != "jacek" || processedRecords[0].Age != 2704 {
-		t.Fatalf("Unexpected record data: expected=(jacek), got=(%s,%d)", processedRecords[0].Name, processedRecords[0].Age)
+	if processedRecords[0].Name != "jacek" || processedRecords[0].Age != 676 {
+		t.Fatalf("Unexpected record data: expected=(jacek,676), got=(%s,%d)", processedRecords[0].Name, processedRecords[0].Age)
 	}
 
-	if processedRecords[1].Name != "john" || processedRecords[1].Age != 4624 {
-		t.Fatalf("Unexpected record data: expected=(john), got=(%s,%d,%v)", processedRecords[1].Name, processedRecords[1].Age, processedRecords[1].CreatedAt)
+	if processedRecords[1].Name != "john" || processedRecords[1].Age != 1156 {
+		t.Fatalf("Unexpected record data: expected=(john,1156), got=(%s,%d,%v)", processedRecords[1].Name, processedRecords[1].Age, processedRecords[1].CreatedAt)
 	}
 }

@@ -3,7 +3,7 @@ package adapter
 import (
 	"context"
 
-	"github.com/thalesfsp/etler/option"
+	"github.com/WreckingBallStudioLabs/etler/option"
 	"github.com/thalesfsp/validation"
 )
 
