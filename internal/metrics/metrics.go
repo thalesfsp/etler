@@ -4,6 +4,7 @@ import (
 	"expvar"
 	"fmt"
 
+	"github.com/thalesfsp/etler/internal/shared"
 	"github.com/thalesfsp/status"
 )
 
@@ -31,11 +32,12 @@ func NewString(name string) *expvar.String {
 func NewStringWithPattern(t, subject string, status status.Status) *expvar.String {
 	return NewString(
 		fmt.Sprintf(
-			"%s.%s.%s.%s",
+			"%s.%s.%s.%s.%s",
 			Name,
 			t,
 			subject,
 			status,
+			shared.GenerateUUID(),
 		),
 	)
 }
@@ -56,12 +58,13 @@ func NewInt(name string) *expvar.Int {
 func NewIntWithPattern(t, subject string, status status.Status) *expvar.Int {
 	return NewInt(
 		fmt.Sprintf(
-			"%s.%s.%s.%s.%s",
+			"%s.%s.%s.%s.%s.%s",
 			Name,
 			t,
 			subject,
 			status,
 			DefaultMetricCounterLabel,
+			shared.GenerateUUID(),
 		),
 	)
 }
