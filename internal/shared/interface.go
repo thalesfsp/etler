@@ -16,6 +16,9 @@ type IMeta interface {
 
 	// GetDescription returns the `Description` of the processor.
 	GetDescription() string
+
+	// GetType returns the entity type.
+	GetType() string
 }
 
 // IMetrics defines how to interact with the metrics.

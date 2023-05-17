@@ -103,6 +103,11 @@ func (p *Processor[T]) SetOnFinished(onFinished OnFinished[T]) {
 	p.OnFinished = onFinished
 }
 
+// GetType returns the entity type.
+func (p *Processor[T]) GetType() string {
+	return Type
+}
+
 // Run the transform function.
 func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 	// originalIn is a copy of the input.
@@ -146,7 +151,7 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 				customerror.NewFailedToError(
 					"process",
 					customerror.WithError(ctx.Err()),
-					customerror.WithField("processor", p.GetName()),
+					customerror.WithField(Type, p.GetName()),
 				),
 				p.GetLogger(),
 				p.GetCounterFailed(),
@@ -180,7 +185,7 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 			customerror.NewFailedToError(
 				"process",
 				customerror.WithError(err),
-				customerror.WithField("processor", p.GetName()),
+				customerror.WithField(Type, p.GetName()),
 			),
 			p.GetLogger(),
 			p.GetCounterFailed(),
@@ -229,6 +234,7 @@ func New[T any](
 		opt(p)
 	}
 
+	// Validation.
 	if err := validation.Validate(p); err != nil {
 		return nil, err
 	}

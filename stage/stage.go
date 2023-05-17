@@ -109,6 +109,11 @@ func (s *Stage[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
 	s.OnFinished = onFinished
 }
 
+// GetType returns the entity type.
+func (s *Stage[In, Out]) GetType() string {
+	return Type
+}
+
 // Run the transform function.
 func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	//////
@@ -147,12 +152,19 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 			// Observability: logging, metrics.
 			s.GetStatus().Set(status.Failed.String())
 
-			s.GetCounterFailed().Add(1)
-
 			// Returns whatever is in `out` and the error.
 			//
 			// Don't need tracing, it's already traced.
-			return out, err
+			return out, customapm.TraceError(
+				tracedContext,
+				customerror.New(
+					"failed to run processor",
+					customerror.WithError(err),
+					customerror.WithField(Type, s.Name),
+				),
+				s.GetLogger(),
+				s.GetCounterFailed(),
+			)
 		}
 
 		// Update the input with the output.
@@ -176,7 +188,7 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 			customerror.NewFailedToError(
 				"convert",
 				customerror.WithError(errs),
-				customerror.WithField("stage", s.Name),
+				customerror.WithField(Type, s.Name),
 			),
 			s.GetLogger(),
 			s.GetCounterFailed(),
@@ -219,6 +231,7 @@ func New[In, Out any](
 		Status:         metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
+	// Validation.
 	if err := validation.Validate(s); err != nil {
 		return nil, err
 	}

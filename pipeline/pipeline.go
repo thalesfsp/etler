@@ -6,6 +6,7 @@ import (
 	"context"
 	"expvar"
 
+	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/etler/internal/customapm"
 	"github.com/thalesfsp/etler/internal/logging"
 	"github.com/thalesfsp/etler/internal/metrics"
@@ -124,6 +125,11 @@ func (p *Pipeline[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
 	p.OnFinished = onFinished
 }
 
+// GetType returns the entity type.
+func (p *Pipeline[In, Out]) GetType() string {
+	return Type
+}
+
 // Run the pipeline.
 func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	//////
@@ -158,12 +164,17 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 			// Observability: logging, metrics.
 			p.GetStatus().Set(status.Failed.String())
 
-			p.GetCounterFailed().Add(1)
-
 			// Returns whatever is in `out` and the error.
-			//
-			// Don't need tracing, it's already traced.
-			return out, err
+			return out, customapm.TraceError(
+				tracedContext,
+				customerror.New(
+					"failed to run stage",
+					customerror.WithError(err),
+					customerror.WithField(Type, p.Name),
+				),
+				s.GetLogger(),
+				s.GetCounterFailed(),
+			)
 		}
 
 		out = append(out, oS...)
@@ -206,6 +217,7 @@ func New[In, Out any](
 		Status:         metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
+	// Validation.
 	if err := validation.Validate(p); err != nil {
 		return nil, err
 	}
