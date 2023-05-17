@@ -1,7 +1,0 @@
-version: "3"
-services:
-  etl:
-    image: your-etl-image:latest
-    env_file:
-      - .env
-    command: ["/app/etl", "--config", "/app/config.yml"]
