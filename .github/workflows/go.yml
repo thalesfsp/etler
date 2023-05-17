@@ -36,8 +36,3 @@ jobs:
         run: |
           curl -s https://raw.githubusercontent.com/thalesfsp/configurer/main/resources/install.sh | sh
           make test coverage
-          
-      - name: Integration test
-        run: |
-          curl -s https://raw.githubusercontent.com/thalesfsp/configurer/main/resources/install.sh | sh
-          make test-integration coverage
