@@ -16,6 +16,7 @@ import (
 // Consts, vars and types.
 //////
 
+// Name of the converter.
 const Name = "csv"
 
 // CSV definition.
