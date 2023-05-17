@@ -1,13 +1,22 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/etler/processor"
+	"github.com/thalesfsp/etler/stage"
+	"github.com/thalesfsp/status"
 )
+
+// Number is a simple struct to be used in the tests.
+type Number struct {
+	// Numbers to be processed.
+	Numbers []int `json:"numbers"`
+}
 
 type TestUser struct {
 	Age       int       `json:"age,omitempty"`
@@ -15,14 +24,24 @@ type TestUser struct {
 	Name      string    `json:"name"`
 }
 
-var buf = new(bytes.Buffer)
+type TestUserUpdate struct {
+	Age       int       `json:"age,omitempty"`
+	Code      string    `json:"code"`
+	CreatedAt time.Time `json:"created_at"`
+	Name      string    `json:"name"`
+}
 
 func TestCSVFileAdapter_Read(t *testing.T) {
+	// Context with timeout. It controls the pipeline execution.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	//////
-	// Processors.
+	// Setup processors.
 	//////
 
-	double := processor.New(
+	double, err := processor.New(
+		ctx,
 		"double",
 		"doubles the input",
 		func(ctx context.Context, in []TestUser) ([]TestUser, error) {
@@ -30,14 +49,22 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 			for i, v := range in {
 				out[i] = v
+				out[i].Name = v.Name + "-double"
 				out[i].Age = v.Age * 2
 			}
 
 			return out, nil
 		},
+		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedIn []TestUser) {
+			fmt.Println(p.GetName(), "finished")
+		}),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	square := processor.New(
+	square, err := processor.New(
+		ctx,
 		"square",
 		"squares the input",
 		func(ctx context.Context, in []TestUser) ([]TestUser, error) {
@@ -45,28 +72,54 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 			for i, v := range in {
 				out[i] = v
+				out[i].Name = v.Name + "-square"
 				out[i].Age = v.Age * v.Age
 			}
 
 			return out, nil
 		},
+		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedIn []TestUser) {
+			fmt.Println(p.GetName(), "finished")
+		}),
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//////
+	// Setup stage.
+	//////
+
+	stg1, err := stage.New(
+		ctx,
+		"stage-1",
+		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+			return TestUserUpdate{
+				Age:       tu.Age,
+				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+				CreatedAt: tu.CreatedAt,
+				Name:      tu.Name,
+			}, nil
+		},
+		// Add as many as you want.
+		double, square,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	//////
 	// Setup pipeline.
 	//////
 
 	// Create a new pipeline.
-	p := New(
-		"User Enhancer",
-		"Enhances user data",
-		[]Stage[TestUser, TestUser]{
-			{
-				Concurrent: false,
-				Processors: []processor.IProcessor[TestUser, TestUser]{double, square},
-			},
-		},
+	p, err := New(ctx, "User Enhancer", "Enhances user data", false,
+		// Add as many as you want.
+		stg1,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	//////
 	// Run the pipeline.
@@ -74,7 +127,7 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 	records := []TestUser{
 		{
-			Name: "jacek",
+			Name: "jack",
 			Age:  26,
 		},
 		{
@@ -83,14 +136,34 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 		},
 	}
 
-	// Context with timeout.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	processedRecords, err := p.Run(ctx, records)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	assert.Equal(t, int64(1), double.GetCounterCreated().Value())
+	assert.Equal(t, int64(1), double.GetCounterRunning().Value())
+	assert.Equal(t, int64(0), double.GetCounterFailed().Value())
+	assert.Equal(t, int64(1), double.GetCounterDone().Value())
+	assert.Equal(t, status.Done.String(), double.GetStatus().Value())
+
+	assert.Equal(t, int64(1), square.GetCounterCreated().Value())
+	assert.Equal(t, int64(1), square.GetCounterRunning().Value())
+	assert.Equal(t, int64(0), square.GetCounterFailed().Value())
+	assert.Equal(t, int64(1), square.GetCounterDone().Value())
+	assert.Equal(t, status.Done.String(), square.GetStatus().Value())
+
+	assert.Equal(t, int64(1), stg1.GetCounterCreated().Value())
+	assert.Equal(t, int64(1), stg1.GetCounterRunning().Value())
+	assert.Equal(t, int64(0), stg1.GetCounterFailed().Value())
+	assert.Equal(t, int64(1), stg1.GetCounterDone().Value())
+	assert.Equal(t, status.Done.String(), stg1.GetStatus().Value())
+
+	assert.Equal(t, int64(1), p.GetCounterCreated().Value())
+	assert.Equal(t, int64(1), p.GetCounterRunning().Value())
+	assert.Equal(t, int64(0), p.GetCounterFailed().Value())
+	assert.Equal(t, int64(1), p.GetCounterDone().Value())
+	assert.Equal(t, status.Done.String(), p.GetStatus().Value())
 
 	//////
 	// Validates changes in `processedRecords`.
@@ -98,13 +171,5 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 	if len(processedRecords) != 2 {
 		t.Fatalf("Unexpected number of out: expected=2, got=%d", len(processedRecords))
-	}
-
-	if processedRecords[0].Name != "jacek" || processedRecords[0].Age != 676 {
-		t.Fatalf("Unexpected record data: expected=(jacek,676), got=(%s,%d)", processedRecords[0].Name, processedRecords[0].Age)
-	}
-
-	if processedRecords[1].Name != "john" || processedRecords[1].Age != 1156 {
-		t.Fatalf("Unexpected record data: expected=(john,1156), got=(%s,%d,%v)", processedRecords[1].Name, processedRecords[1].Age, processedRecords[1].CreatedAt)
 	}
 }

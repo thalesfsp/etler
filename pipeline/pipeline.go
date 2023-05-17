@@ -4,128 +4,217 @@ package pipeline
 
 import (
 	"context"
-	"sync"
+	"expvar"
 
-	"github.com/thalesfsp/etler/adapter"
-	"github.com/thalesfsp/etler/processor"
-	"github.com/thalesfsp/etler/shared"
+	"github.com/thalesfsp/etler/internal/customapm"
+	"github.com/thalesfsp/etler/internal/logging"
+	"github.com/thalesfsp/etler/internal/metrics"
+	"github.com/thalesfsp/etler/internal/shared"
+	"github.com/thalesfsp/etler/stage"
 	"github.com/thalesfsp/status"
+	"github.com/thalesfsp/sypl"
+	"github.com/thalesfsp/sypl/level"
+	"github.com/thalesfsp/validation"
 )
 
-// Number is a simple struct to be used in the tests.
-type Number struct {
-	// Numbers to be processed.
-	Numbers []int `json:"numbers"`
-}
+//////
+// Consts, vars and types.
+//////
 
-// Stage definition.
-type Stage[In any, Out any] struct {
-	// Concurrent determines whether the stage should be run concurrently.
-	Concurrent bool `json:"concurrent"`
-
-	// Processors to be run in the stage.
-	Processors []processor.IProcessor[In, Out] `json:"processors"`
-}
-
-// IPipeline defines what a `Pipeline` must do.
-type IPipeline[In any, Out any] interface {
-	shared.IMeta[In]
-
-	Run(ctx context.Context, in []In) (out []Out, err error)
-}
+// Type of the entity.
+const Type = "pipeline"
 
 // Pipeline definition.
 type Pipeline[In any, Out any] struct {
+	// Concurrent determines whether the stage should be run concurrently.
+	ConcurrentStage bool `json:"concurrentStage"`
+
+	// Logger is the pipeline logger.
+	Logger sypl.ISypl `json:"-" validate:"required"`
+
 	// Description of the processor.
 	Description string `json:"description"`
 
 	// Name of the processor.
-	Name string `json:"name"`
-
-	// Adapters to be used in the pipeline.
-	Adapters map[string]adapter.IAdapter[In] `json:"adapters"`
-
-	// Control the pipeline.
-	Control chan string `json:"-"`
+	Name string `json:"name" validate:"required"`
 
 	// Progress of the pipeline.
 	Progress int `json:"progress"`
 
-	// Stages to be used in the pipeline.
-	Stages []Stage[In, Out] `json:"stages"`
+	// OnFinished is the function that is called when a processor finishes its
+	// execution.
+	OnFinished OnFinished[In, Out] `json:"-"`
 
-	// State of the pipeline.
-	State status.Status `json:"state"`
+	// Stages to be used in the pipeline.
+	Stages []stage.IStage[In, Out] `json:"stages" validate:"dive,required,dive"`
+
+	// Metrics.
+	CounterCreated *expvar.Int    `json:"counterCreated" validate:"required,gte=0"`
+	CounterRunning *expvar.Int    `json:"counterRunning" validate:"required,gte=0"`
+	CounterFailed  *expvar.Int    `json:"counterFailed" validate:"required,gte=0"`
+	CounterDone    *expvar.Int    `json:"counterDone" validate:"required,gte=0"`
+	Status         *expvar.String `json:"status" validate:"required,gte=0"`
 }
 
-// GetDescription returns the `Description` of the processor.
+//////
+// Methods.
+//////
+
+// GetDescription returns the `Description` of the pipeline.
 func (p *Pipeline[In, Out]) GetDescription() string {
 	return p.Description
 }
 
-// GetName returns the `Name` of the processor.
+// GetLogger returns the `Logger` of the pipeline.
+func (p *Pipeline[In, Out]) GetLogger() sypl.ISypl {
+	return p.Logger
+}
+
+// GetName returns the `Name` of the pipeline.
 func (p *Pipeline[In, Out]) GetName() string {
 	return p.Name
 }
 
-// GetState returns the `State` of the processor.
-func (p *Pipeline[In, Out]) GetState() status.Status {
-	return p.State
+// GetCounterCreated returns the `CounterCreated` of the processor.
+func (p *Pipeline[In, Out]) GetCounterCreated() *expvar.Int {
+	return p.CounterCreated
 }
 
-// SetState sets the `State` of the processor.
-func (p *Pipeline[In, Out]) SetState(state status.Status) {
-	p.State = state
+// GetCounterRunning returns the `CounterRunning` of the processor.
+func (p *Pipeline[In, Out]) GetCounterRunning() *expvar.Int {
+	return p.CounterRunning
+}
+
+// GetCounterFailed returns the `CounterFailed` of the processor.
+func (p *Pipeline[In, Out]) GetCounterFailed() *expvar.Int {
+	return p.CounterFailed
+}
+
+// GetCounterDone returns the `CounterDone` of the processor.
+func (p *Pipeline[In, Out]) GetCounterDone() *expvar.Int {
+	return p.CounterDone
+}
+
+// GetStatus returns the `Status` metric.
+func (p *Pipeline[In, Out]) GetStatus() *expvar.String {
+	return p.Status
+}
+
+// GetPaused returns the Paused status.
+func (p *Pipeline[In, Out]) GetPaused() status.Status {
+	if shared.GetPaused() == 1 {
+		return status.Paused
+	}
+
+	return status.Runnning
+}
+
+// SetPaused sets the Paused status.
+func (p *Pipeline[In, Out]) SetPaused() {
+	shared.SetPaused(1)
+}
+
+// GetOnFinished returns the `OnFinished` function.
+func (p *Pipeline[In, Out]) GetOnFinished() OnFinished[In, Out] {
+	return p.OnFinished
+}
+
+// SetOnFinished sets the `OnFinished` function.
+func (p *Pipeline[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
+	p.OnFinished = onFinished
 }
 
 // Run the pipeline.
-func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) (out []Out, err error) {
+func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
+	//////
+	// Observability: logging, metrics, and tracing.
+	//////
+
+	tracedContext, span := customapm.Trace(
+		ctx,
+		Type,
+		p.GetName(),
+		status.Runnning,
+		p.Logger,
+		p.CounterRunning,
+	)
+	defer span.End()
+
+	// Update the status.
+	p.GetStatus().Set(status.Runnning.String())
+
+	//////
+	// Run the pipeline.
+	//////
+
+	// Initialize the output.
+	out := make([]Out, 0)
+
 	// Iterate through the stages, passing the output of each stage
 	// as the input of the next stage.
 	for _, s := range p.Stages {
-		if s.Concurrent {
-			var wg sync.WaitGroup
+		oS, err := s.Run(tracedContext, in)
+		if err != nil {
+			// Observability: logging, metrics.
+			p.GetStatus().Set(status.Failed.String())
 
-			for _, p := range s.Processors {
-				wg.Add(1)
+			p.GetCounterFailed().Add(1)
 
-				// Start a goroutine to run the stage.
-				//
-				// TODO: Make it boundaded.
-				go func(ctx context.Context, p processor.IProcessor[In, Out]) {
-					// Process the data.
-					out, err = p.Run(ctx, in)
-
-					wg.Done()
-				}(ctx, p)
-			}
-
-			wg.Wait()
-		} else {
-			// Process the data sequentially.
-			for _, p := range s.Processors {
-				out, err = p.Run(ctx, in)
-				if err != nil {
-					return out, err
-				}
-			}
+			// Returns whatever is in `out` and the error.
+			//
+			// Don't need tracing, it's already traced.
+			return out, err
 		}
+
+		out = append(out, oS...)
 	}
 
-	return out, err
+	// Observability: logging, metrics.
+	p.GetStatus().Set(status.Done.String())
+
+	p.GetCounterDone().Add(1)
+
+	if p.GetOnFinished() != nil {
+		p.GetOnFinished()(ctx, p, in, out)
+	}
+
+	return out, nil
 }
 
+//////
+// Factory.
+//////
+
 // New returns a new pipeline.
-func New[In any, Out any](
+func New[In, Out any](
+	ctx context.Context,
 	name string,
 	description string,
-	stages []Stage[In, Out],
-) IPipeline[In, Out] {
-	return &Pipeline[In, Out]{
-		Control:  make(chan string),
-		Name:     name,
-		Progress: 0,
-		Stages:   stages,
-		State:    status.Stopped,
+	concurrentStage bool,
+	stages ...stage.IStage[In, Out],
+) (IPipeline[In, Out], error) {
+	p := &Pipeline[In, Out]{
+		ConcurrentStage: false,
+		Logger:          logging.Get().New(name).SetTags(Type, name),
+		Name:            name,
+		Progress:        0,
+		Stages:          stages,
+
+		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
+		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
+		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
+		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
+		Status:         metrics.NewStringWithPattern(Type, name, status.Name),
 	}
+
+	if err := validation.Validate(p); err != nil {
+		return nil, err
+	}
+
+	// Observability: logging, metrics.
+	p.GetCounterCreated().Add(1)
+
+	p.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
+
+	return p, nil
 }
