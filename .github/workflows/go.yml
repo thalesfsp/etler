@@ -14,58 +14,6 @@ jobs:
     # Docker Hub image that `container-job` executes in
     container: golang
 
-    # Service containers to run with `container-job`
-    services:
-      # Label used to access the service container
-      redis:
-        # Docker Hub image
-        image: redis
-        # Set health checks to wait until redis has started
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      postgres:
-        image: postgres
-        env:
-          POSTGRES_DB: test
-          POSTGRES_HOST_AUTH_METHOD: trust
-          POSTGRES_SSLMODE: disable
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      mongodb:
-        image: mongo
-        env:
-          MONGO_INITDB_DATABASE: api
-
-      # Can't use this because CI doesn't support "command"...
-      # sftp:
-      #   image: atmoz/sftp
-      #   env:
-      #     SFTP_USERS: foo:pass
-      #     SFTP_PASSWORD_AUTH: false
-      #   ports:
-      #     - "2222:22"
-      #   command: foo:pass:::upload
-
-      elasticsearch:
-        image: docker.elastic.co/elasticsearch/elasticsearch:8.4.3
-        env:
-          discovery.type: single-node
-          ES_JAVA_OPTS: -Xms512m -Xmx512m
-          xpack.security.enabled: false
-        options: >-
-          --health-cmd "curl http://localhost:9200/_cluster/health"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       # Downloads a copy of the code in your repository before running CI tests
       - name: Check out repository code
