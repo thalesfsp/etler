@@ -1,0 +1,109 @@
+run:
+  timeout: 1m
+
+linters:
+  enable-all: true
+  disable:
+    - godox
+    - varnamelen
+    - wrapcheck
+    - exhaustivestruct
+    - exhaustruct
+    - tagliatelle
+    - contextcheck
+    - ireturn
+    - gomnd
+    - noctx
+    - gochecknoglobals
+    - lll
+    - interfacebloat
+  fast: false
+
+# Settings for specific linters
+linters-settings:
+  funlen:
+    lines: 250
+    statements: 70
+
+  cyclop:
+    skip-tests: true
+    max-complexity: 25
+    package-average: 0
+
+  wsl:
+    allow-separated-leading-comment: true
+
+issues:
+  exclude-rules:
+    - path: cmd/
+      linters:
+        - gochecknoinits
+        - gomnd
+        - forbidigo
+        - exhaustruct
+        - exhaustivestruct
+        - staticcheck
+        - varnamelen
+        - wsl
+        - nestif
+
+    - path: internal/shared/util.go
+      linters:
+        - gosec
+
+    - path: example_test.go
+      linters:
+        - lll
+        - nosnakecase
+
+    - path: test.go
+      linters:
+        - testpackage
+        - cyclop
+
+    - path: _test\.go
+      linters:
+        - funlen
+        - scopelint
+        - wsl
+        - containedctx
+        - nlreturn
+        - gocognit
+        - goerr113
+        - paralleltest
+        - lll
+        - govet
+        - ifshort
+        - maligned
+        - maintidx
+        - goconst
+        - forbidigo
+
+    - path: doc.go
+      linters:
+        - lll
+
+    - path: resource.go
+      linters:
+        - wsl
+
+    - text: "O_WRONLY|O_RDWR|O_CREATE|O_TRUNC|O_APPEND"
+      linters:
+        - nosnakecase
+
+    - linters:
+        - lll
+      source: "json:"
+
+    - linters:
+        - gocritic
+        - godot
+        - lll
+        - wsl
+      source: "//////"
+
+    - linters:
+        - gocritic
+        - godot
+        - lll
+      source: "//"
