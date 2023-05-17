@@ -11,7 +11,6 @@ import (
 
 func TestNew(t *testing.T) {
 	double, err := New(
-		context.Background(),
 		"double",
 		"doubles the input",
 		func(ctx context.Context, in []int) ([]int, error) {

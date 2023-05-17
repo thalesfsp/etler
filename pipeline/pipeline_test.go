@@ -41,7 +41,6 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	//////
 
 	double, err := processor.New(
-		ctx,
 		"double",
 		"doubles the input",
 		func(ctx context.Context, in []TestUser) ([]TestUser, error) {
@@ -64,7 +63,6 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	}
 
 	square, err := processor.New(
-		ctx,
 		"square",
 		"squares the input",
 		func(ctx context.Context, in []TestUser) ([]TestUser, error) {
@@ -91,7 +89,6 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	//////
 
 	stg1, err := stage.New(
-		ctx,
 		"stage-1",
 		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
 			return TestUserUpdate{
@@ -113,7 +110,7 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	//////
 
 	// Create a new pipeline.
-	p, err := New(ctx, "User Enhancer", "Enhances user data", false,
+	p, err := New("User Enhancer", "Enhances user data", false,
 		// Add as many as you want.
 		stg1,
 	)

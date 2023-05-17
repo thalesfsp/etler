@@ -206,7 +206,6 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 
 // New returns a new processor.
 func New[T any](
-	ctx context.Context,
 	name string,
 	description string,
 	fn shared.Run[T],

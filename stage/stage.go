@@ -202,7 +202,6 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 // New returns a new stage.
 func New[In, Out any](
-	ctx context.Context,
 	name string,
 	conversor concurrentloop.MapFunc[In, Out],
 	processors ...processor.IProcessor[In],

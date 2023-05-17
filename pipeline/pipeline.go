@@ -187,7 +187,6 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 // New returns a new pipeline.
 func New[In, Out any](
-	ctx context.Context,
 	name string,
 	description string,
 	concurrentStage bool,

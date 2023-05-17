@@ -12,7 +12,6 @@ import (
 
 func TestNew(t *testing.T) {
 	double, err := processor.New(
-		context.Background(),
 		"double",
 		"doubles the input",
 		func(ctx context.Context, in []int) ([]int, error) {
@@ -34,7 +33,6 @@ func TestNew(t *testing.T) {
 	}
 
 	stg1, err := New(
-		context.Background(),
 		"stage-1",
 		func(ctx context.Context, tu int) (int, error) {
 			return tu, nil
