@@ -9,7 +9,7 @@ import (
 )
 
 // Compile the regular expression
-var pattern = regexp.MustCompile(`\s+`)
+var pattern = regexp.MustCompile(`\t`)
 
 // LoadCSV loads a CSV file and converts it to JSON.
 func LoadCSV[T any](r io.Reader) (T, error) {
