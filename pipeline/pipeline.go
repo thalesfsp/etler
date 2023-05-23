@@ -146,9 +146,12 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	)
 	defer span.End()
 
+	// Initialize the output.
+	out := make([]Out, 0)
+
 	// Validation.
 	if in == nil {
-		customapm.TraceError(
+		return out, customapm.TraceError(
 			tracedContext,
 			customerror.NewRequiredError(
 				"input",
@@ -165,9 +168,6 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	//////
 	// Run the pipeline.
 	//////
-
-	// Initialize the output.
-	out := make([]Out, 0)
 
 	// Iterate through the stages, passing the output of each stage
 	// as the input of the next stage.

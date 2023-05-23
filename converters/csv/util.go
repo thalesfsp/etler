@@ -19,8 +19,10 @@ var pattern = regexp.MustCompile(`\t`)
 // Helpers.
 //////
 
-// LoadCSV loads a CSV file and converts it to JSON.
-func LoadCSV[T any](r io.Reader) (T, error) {
+// Convert loads a CSV file and converts it to JSON.
+//
+//nolint:prealloc
+func Convert[T any](r io.Reader) (T, error) {
 	// Create a new CSV reader
 	reader := csv.NewReader(r)
 

@@ -47,7 +47,7 @@ func (c *CSV[T]) Run(ctx context.Context, r io.Reader) (T, error) {
 	// Update the status.
 	c.GetStatus().Set(status.Runnning.String())
 
-	converted, err := LoadCSV[T](r)
+	converted, err := Convert[T](r)
 	if err != nil {
 		// Observability: logging, metrics.
 		c.GetStatus().Set(status.Failed.String())
