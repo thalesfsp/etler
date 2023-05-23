@@ -81,7 +81,7 @@ func (c *CSV[T]) Run(ctx context.Context, r io.Reader) (T, error) {
 // Factory.
 //////
 
-// New creates a new Redis storage.
+// New creates a new converter.
 func New[T any](opts ...converter.Func[T]) (*CSV[T], error) {
 	// Enforces IStorage interface implementation.
 	var _ converter.IConverter[T] = (*CSV[T])(nil)

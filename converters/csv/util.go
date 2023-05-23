@@ -8,8 +8,16 @@ import (
 	"github.com/thalesfsp/etler/internal/shared"
 )
 
+//////
+// Consts, vars and types.
+//////
+
 // Compile the regular expression
 var pattern = regexp.MustCompile(`\t`)
+
+//////
+// Helpers.
+//////
 
 // LoadCSV loads a CSV file and converts it to JSON.
 func LoadCSV[T any](r io.Reader) (T, error) {

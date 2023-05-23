@@ -146,6 +146,19 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	)
 	defer span.End()
 
+	// Validation.
+	if in == nil {
+		customapm.TraceError(
+			tracedContext,
+			customerror.NewRequiredError(
+				"input",
+				customerror.WithField(Type, p.Name),
+			),
+			p.GetLogger(),
+			p.GetCounterFailed(),
+		)
+	}
+
 	// Update the status.
 	p.GetStatus().Set(status.Runnning.String())
 
