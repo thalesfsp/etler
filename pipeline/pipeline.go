@@ -7,15 +7,16 @@ import (
 	"expvar"
 
 	"github.com/thalesfsp/customerror"
+	"github.com/thalesfsp/status"
+	"github.com/thalesfsp/sypl"
+	"github.com/thalesfsp/sypl/level"
+	"github.com/thalesfsp/validation"
+
 	"github.com/thalesfsp/etler/v2/internal/customapm"
 	"github.com/thalesfsp/etler/v2/internal/logging"
 	"github.com/thalesfsp/etler/v2/internal/metrics"
 	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/etler/v2/stage"
-	"github.com/thalesfsp/status"
-	"github.com/thalesfsp/sypl"
-	"github.com/thalesfsp/sypl/level"
-	"github.com/thalesfsp/validation"
 )
 
 //////
@@ -50,11 +51,11 @@ type Pipeline[In any, Out any] struct {
 	Stages []stage.IStage[In, Out] `json:"stages" validate:"dive,required,dive"`
 
 	// Metrics.
-	CounterCreated *expvar.Int    `json:"counterCreated" validate:"required,gte=0"`
-	CounterRunning *expvar.Int    `json:"counterRunning" validate:"required,gte=0"`
-	CounterFailed  *expvar.Int    `json:"counterFailed" validate:"required,gte=0"`
-	CounterDone    *expvar.Int    `json:"counterDone" validate:"required,gte=0"`
-	Status         *expvar.String `json:"status" validate:"required,gte=0"`
+	CounterCreated *expvar.Int    `json:"counterCreated"`
+	CounterRunning *expvar.Int    `json:"counterRunning"`
+	CounterFailed  *expvar.Int    `json:"counterFailed"`
+	CounterDone    *expvar.Int    `json:"counterDone"`
+	Status         *expvar.String `json:"status"`
 }
 
 //////
