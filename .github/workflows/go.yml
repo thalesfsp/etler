@@ -26,11 +26,12 @@ jobs:
           go-version: 1.19
           cache: true
 
-      - name: Setup golangci-lint
-        uses: golangci/golangci-lint-action@v3.1.0
-        with:
-          version: v1.51.2
-          args: --timeout 10m -v -c .golangci.yml
+      # golangci-lint is currently unsuable, performance is very poor.
+      # - name: Setup golangci-lint
+      #   uses: golangci/golangci-lint-action@v3.1.0
+      #   with:
+      #     version: v1.51.2
+      #     args: --timeout 10m -v -c .golangci.yml
 
       - name: Test
         run: |
