@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/thalesfsp/status"
+
 	"github.com/thalesfsp/etler/v2/processor"
 	"github.com/thalesfsp/etler/v2/stage"
-	"github.com/thalesfsp/status"
 )
 
 // Number is a simple struct to be used in the tests.

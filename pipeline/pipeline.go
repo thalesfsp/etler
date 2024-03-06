@@ -48,7 +48,7 @@ type Pipeline[In any, Out any] struct {
 	OnFinished OnFinished[In, Out] `json:"-"`
 
 	// Stages to be used in the pipeline.
-	Stages []stage.IStage[In, Out] `json:"stages" validate:"dive,required,dive"`
+	Stages []stage.IStage[In, Out] `json:"stages"`
 
 	// Metrics.
 	CounterCreated *expvar.Int    `json:"counterCreated"`
