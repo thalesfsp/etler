@@ -5,7 +5,7 @@ import (
 	"expvar"
 	"fmt"
 
-	"github.com/thalesfsp/etler/internal/logging"
+	"github.com/thalesfsp/etler/v2/internal/logging"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/fields"

@@ -4,7 +4,7 @@ import (
 	"expvar"
 	"fmt"
 
-	"github.com/thalesfsp/etler/internal/shared"
+	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/status"
 )
 

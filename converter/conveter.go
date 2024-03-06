@@ -3,8 +3,8 @@ package converter
 import (
 	"expvar"
 
-	"github.com/thalesfsp/etler/internal/logging"
-	"github.com/thalesfsp/etler/internal/metrics"
+	"github.com/thalesfsp/etler/v2/internal/logging"
+	"github.com/thalesfsp/etler/v2/internal/metrics"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/level"

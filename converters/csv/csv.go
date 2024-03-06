@@ -6,8 +6,8 @@ import (
 	"io"
 
 	"github.com/thalesfsp/customerror"
-	"github.com/thalesfsp/etler/converter"
-	"github.com/thalesfsp/etler/internal/customapm"
+	"github.com/thalesfsp/etler/v2/converter"
+	"github.com/thalesfsp/etler/v2/internal/customapm"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/validation"
 )
