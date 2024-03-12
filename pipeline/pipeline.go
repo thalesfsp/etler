@@ -217,10 +217,14 @@ func New[In, Out any](
 	concurrentStage bool,
 	stages ...stage.IStage[In, Out],
 ) (IPipeline[In, Out], error) {
+	// WARN: Currently disabled.
+	concurrentStage = false
+
 	p := &Pipeline[In, Out]{
-		ConcurrentStage: false,
+		ConcurrentStage: concurrentStage,
 		Logger:          logging.Get().New(name).SetTags(Type, name),
 		Name:            name,
+		Description:     description,
 		Progress:        0,
 		Stages:          stages,
 
