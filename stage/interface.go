@@ -2,6 +2,8 @@ package stage
 
 import (
 	"context"
+	"expvar"
+	"time"
 
 	"github.com/thalesfsp/etler/v2/internal/shared"
 )
@@ -11,6 +13,21 @@ type IStage[In, Out any] interface {
 	shared.IMeta
 
 	shared.IMetrics
+
+	// GetCreatedAt returns the created at time.
+	GetCreatedAt() time.Time
+
+	// GetDuration returns the `CounterDuration` of the stage.
+	GetDuration() *expvar.Int
+
+	// GetProgress returns the `CounterProgress` of the stage.
+	GetProgress() *expvar.Int
+
+	// GetProgressPercent returns the `ProgressPercent` of the stage.
+	GetProgressPercent() *expvar.String
+
+	// SetProgressPercent sets the `ProgressPercent` of the stage.
+	SetProgressPercent()
 
 	// GetOnFinished returns the `OnFinished` function.
 	GetOnFinished() OnFinished[In, Out]

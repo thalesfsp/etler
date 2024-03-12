@@ -3,6 +3,8 @@ package stage
 import (
 	"context"
 	"expvar"
+	"fmt"
+	"time"
 
 	"github.com/thalesfsp/concurrentloop"
 	"github.com/thalesfsp/customerror"
@@ -26,7 +28,7 @@ const Type = "stage"
 
 // Stage definition.
 type Stage[In, Out any] struct {
-	// Description of the processor.
+	// Description of the stage.
 	Description string `json:"description"`
 
 	// Conversor to be used in the stage.
@@ -45,27 +47,31 @@ type Stage[In, Out any] struct {
 	// Processors to be run in the stage.
 	Processors []processor.IProcessor[In] `json:"processors" validate:"required,gt=0"`
 
-	// Progress of the stage.
-	Progress int `json:"progress"`
+	// CreatedAt is the time when the stage was created.
+	CreatedAt time.Time `json:"createdAt"`
 
 	// Metrics.
-	CounterCreated *expvar.Int    `json:"counterCreated"`
-	CounterRunning *expvar.Int    `json:"counterRunning"`
-	CounterFailed  *expvar.Int    `json:"counterFailed"`
-	CounterDone    *expvar.Int    `json:"counterDone"`
-	Status         *expvar.String `json:"status"`
+	CounterCreated *expvar.Int `json:"counterCreated"`
+	CounterDone    *expvar.Int `json:"counterDone"`
+	CounterFailed  *expvar.Int `json:"counterFailed"`
+	CounterRunning *expvar.Int `json:"counterRunning"`
+
+	Duration        *expvar.Int    `json:"duration"`
+	Progress        *expvar.Int    `json:"progress"`
+	ProgressPercent *expvar.String `json:"progressPercent"`
+	Status          *expvar.String `json:"status"`
 }
 
 //////
 // Methods.
 //////
 
-// GetDescription returns the `Description` of the processor.
+// GetDescription returns the `Description` of the stage.
 func (s *Stage[In, Out]) GetDescription() string {
 	return s.Description
 }
 
-// GetLogger returns the `Logger` of the processor.
+// GetLogger returns the `Logger` of the stage.
 func (s *Stage[In, Out]) GetLogger() sypl.ISypl {
 	return s.Logger
 }
@@ -75,24 +81,48 @@ func (s *Stage[In, Out]) GetName() string {
 	return s.Name
 }
 
-// GetCounterCreated returns the `CounterCreated` of the processor.
+// GetCounterCreated returns the `CounterCreated` of the stage.
 func (s *Stage[In, Out]) GetCounterCreated() *expvar.Int {
 	return s.CounterCreated
 }
 
-// GetCounterRunning returns the `CounterRunning` of the processor.
+// GetCounterRunning returns the `CounterRunning` of the stage.
 func (s *Stage[In, Out]) GetCounterRunning() *expvar.Int {
 	return s.CounterRunning
 }
 
-// GetCounterFailed returns the `CounterFailed` of the processor.
+// GetCounterFailed returns the `CounterFailed` of the stage.
 func (s *Stage[In, Out]) GetCounterFailed() *expvar.Int {
 	return s.CounterFailed
 }
 
-// GetCounterDone returns the `CounterDone` of the processor.
+// GetCounterDone returns the `CounterDone` of the stage.
 func (s *Stage[In, Out]) GetCounterDone() *expvar.Int {
 	return s.CounterDone
+}
+
+// GetDuration returns the `CounterDuration` of the stage.
+func (s *Stage[In, Out]) GetDuration() *expvar.Int {
+	return s.Duration
+}
+
+// GetProgress returns the `CounterProgress` of the stage.
+func (s *Stage[In, Out]) GetProgress() *expvar.Int {
+	return s.Progress
+}
+
+// GetProgressPercent returns the `ProgressPercent` of the stage.
+func (s *Stage[In, Out]) GetProgressPercent() *expvar.String {
+	return s.ProgressPercent
+}
+
+// SetProgressPercent sets the `ProgressPercent` of the stage.
+func (s *Stage[In, Out]) SetProgressPercent() {
+	currentProgress := s.GetProgress().Value()
+	totalProgress := len(s.Processors)
+	percentage := float64(currentProgress) / float64(totalProgress) * 100
+
+	s.GetProgressPercent().Set(fmt.Sprintf("%d%%", int(percentage)))
 }
 
 // GetStatus returns the `Status` metric.
@@ -113,6 +143,11 @@ func (s *Stage[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
 // GetType returns the entity type.
 func (s *Stage[In, Out]) GetType() string {
 	return Type
+}
+
+// GetCreatedAt returns the created at time.
+func (s *Stage[In, Out]) GetCreatedAt() time.Time {
+	return s.CreatedAt
 }
 
 // Run the transform function.
@@ -170,6 +205,19 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 		// Update the input with the output.
 		retroFeedIn = rFI
+
+		//////
+		// Observability: logging, metrics.
+		//////
+
+		// Increment the progress.
+		s.GetProgress().Add(1)
+
+		// Set the progress percentage.
+		//
+		// NOTE: MUST BE after increment the progress, as its internal calculation
+		// depends on that.
+		s.SetProgressPercent()
 	}
 
 	//////
@@ -196,10 +244,18 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 		)
 	}
 
+	//////
 	// Observability: logging, metrics.
+	//////
+
+	// Update status.
 	s.GetStatus().Set(status.Done.String())
 
+	// Increment the done counter.
 	s.GetCounterDone().Add(1)
+
+	// Set duration.
+	s.GetDuration().Set(time.Since(s.GetCreatedAt()).Milliseconds())
 
 	// Run onEvent callback.
 	if s.GetOnFinished() != nil {
@@ -220,8 +276,10 @@ func New[In, Out any](
 	processors ...processor.IProcessor[In],
 ) (IStage[In, Out], error) {
 	s := &Stage[In, Out]{
-		Conversor:  conversor,
-		Logger:     logging.Get().New(name).SetTags(Type, name),
+		Conversor: conversor,
+		Logger:    logging.Get().New(name).SetTags(Type, name),
+
+		CreatedAt:  time.Now(),
 		Name:       name,
 		Processors: processors,
 
@@ -229,7 +287,11 @@ func New[In, Out any](
 		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
 		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
 		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-		Status:         metrics.NewStringWithPattern(Type, name, status.Name),
+
+		Duration:        metrics.NewIntWithPattern(Type, name, "duration"),
+		Progress:        metrics.NewIntWithPattern(Type, name, "progress"),
+		ProgressPercent: metrics.NewStringWithPattern(Type, name, "progressPercent"),
+		Status:          metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
 	// Validation.
