@@ -32,6 +32,9 @@ type IStage[In, Out any] interface {
 	// GetOnFinished returns the `OnFinished` function.
 	GetOnFinished() OnFinished[In, Out]
 
+	// GetMetrics returns the stage's metrics.
+	GetMetrics() map[string]string
+
 	// SetOnFinished sets the `OnFinished` function.
 	SetOnFinished(onFinished OnFinished[In, Out])
 

@@ -150,6 +150,21 @@ func (s *Stage[In, Out]) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
+// GetMetrics returns the stage's metrics.
+func (s *Stage[In, Out]) GetMetrics() map[string]string {
+	return map[string]string{
+		"createdAt":       s.GetCreatedAt().String(),
+		"counterCreated":  s.GetCounterCreated().String(),
+		"counterDone":     s.GetCounterDone().String(),
+		"counterFailed":   s.GetCounterFailed().String(),
+		"counterRunning":  s.GetCounterRunning().String(),
+		"duration":        s.GetDuration().String(),
+		"progress":        s.GetProgress().String(),
+		"progressPercent": s.GetProgressPercent().String(),
+		"status":          s.GetStatus().String(),
+	}
+}
+
 // Run the transform function.
 func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	//////
@@ -261,6 +276,21 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	if s.GetOnFinished() != nil {
 		s.GetOnFinished()(ctx, s, in, mapOut)
 	}
+
+	// Print the stage's status.
+	s.GetLogger().PrintWithOptions(
+		level.Debug,
+		"done",
+		sypl.WithField("createdAt", s.GetCreatedAt().String()),
+		sypl.WithField("counterCreated", s.GetCounterCreated().String()),
+		sypl.WithField("counterDone", s.GetCounterDone().String()),
+		sypl.WithField("counterFailed", s.GetCounterFailed().String()),
+		sypl.WithField("counterRunning", s.GetCounterRunning().String()),
+		sypl.WithField("duration", s.GetDuration().String()),
+		sypl.WithField("progress", s.GetProgress().String()),
+		sypl.WithField("progressPercent", s.GetProgressPercent().String()),
+		sypl.WithField("status", s.GetStatus().String()),
+	)
 
 	return mapOut, nil
 }
