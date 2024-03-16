@@ -7,7 +7,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/thalesfsp/concurrentloop v1.2.4
 	github.com/thalesfsp/customerror v1.2.1
-	github.com/thalesfsp/status v1.0.16
+	github.com/thalesfsp/status v1.0.17
 	github.com/thalesfsp/sypl v1.9.18
 	github.com/thalesfsp/validation v0.0.3
 	go.elastic.co/apm v1.15.0
@@ -38,7 +38,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/procfs v0.12.0 // indirect
+	github.com/prometheus/procfs v0.13.0 // indirect
 	github.com/santhosh-tekuri/jsonschema v1.2.4 // indirect
 	github.com/thalesfsp/randomness v0.0.9 // indirect
 	go.elastic.co/fastjson v1.3.0 // indirect
