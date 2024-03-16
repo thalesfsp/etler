@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"expvar"
 
 	"github.com/thalesfsp/etler/v2/internal/shared"
 )
@@ -21,6 +22,9 @@ type IProcessor[In any] interface {
 
 	// SetOnFinished sets the `OnFinished` function.
 	SetOnFinished(onFinished OnFinished[In])
+
+	// Get
+	GetCounterInterrupted() *expvar.Int
 
 	// Run the transform function.
 	Run(ctx context.Context, in []In) (out []In, err error)

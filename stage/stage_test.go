@@ -33,7 +33,7 @@ func TestNew(t *testing.T) {
 
 			return out, nil
 		},
-		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[int], originalIn []int, processedIn []int) {
+		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[int], originalIn []int, processedOut []int) {
 			onFinishedTXTBuffer.WriteString(fmt.Sprintf("%s finished\n", p.GetName()))
 		}),
 	)
@@ -57,7 +57,7 @@ func TestNew(t *testing.T) {
 
 			return out, nil
 		},
-		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[int], originalIn []int, processedIn []int) {
+		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[int], originalIn []int, processedOut []int) {
 			onFinishedTXTBuffer.WriteString(fmt.Sprintf("%s finished\n", p.GetName()))
 		}),
 	)
@@ -67,6 +67,7 @@ func TestNew(t *testing.T) {
 
 	stg1, err := New(
 		"stage-1",
+		"main stage",
 		func(ctx context.Context, tu int) (int, error) {
 			return tu, nil
 		},

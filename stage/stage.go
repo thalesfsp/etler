@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
-	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/level"
@@ -16,6 +15,7 @@ import (
 	"github.com/thalesfsp/etler/v2/internal/customapm"
 	"github.com/thalesfsp/etler/v2/internal/logging"
 	"github.com/thalesfsp/etler/v2/internal/metrics"
+	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/etler/v2/processor"
 )
 
@@ -47,15 +47,13 @@ type Stage[In, Out any] struct {
 	// Processors to be run in the stage.
 	Processors []processor.IProcessor[In] `json:"processors" validate:"required,gt=0"`
 
-	// CreatedAt is the time when the stage was created.
-	CreatedAt time.Time `json:"createdAt"`
-
 	// Metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterDone    *expvar.Int `json:"counterDone"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
 	CounterRunning *expvar.Int `json:"counterRunning"`
 
+	CreatedAt       time.Time      `json:"createdAt"`
 	Duration        *expvar.Int    `json:"duration"`
 	Progress        *expvar.Int    `json:"progress"`
 	ProgressPercent *expvar.String `json:"progressPercent"`
@@ -99,11 +97,6 @@ func (s *Stage[In, Out]) GetCounterFailed() *expvar.Int {
 // GetCounterDone returns the `CounterDone` of the stage.
 func (s *Stage[In, Out]) GetCounterDone() *expvar.Int {
 	return s.CounterDone
-}
-
-// GetDuration returns the `CounterDuration` of the stage.
-func (s *Stage[In, Out]) GetDuration() *expvar.Int {
-	return s.Duration
 }
 
 // GetProgress returns the `CounterProgress` of the stage.
@@ -150,6 +143,11 @@ func (s *Stage[In, Out]) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
+// GetDuration returns the `CounterDuration` of the stage.
+func (s *Stage[In, Out]) GetDuration() *expvar.Int {
+	return s.Duration
+}
+
 // GetMetrics returns the stage's metrics.
 func (s *Stage[In, Out]) GetMetrics() map[string]string {
 	return map[string]string{
@@ -168,7 +166,7 @@ func (s *Stage[In, Out]) GetMetrics() map[string]string {
 // Run the transform function.
 func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	//////
-	// Observability: logging, metrics, and tracing.
+	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
 	tracedContext, span := customapm.Trace(
@@ -184,12 +182,13 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	// Update the status.
 	s.GetStatus().Set(status.Runnning.String())
 
-	//////
-	// Stage's processors.
-	//////
+	s.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
 
-	// Initialize the output.
-	out := make([]Out, 0)
+	now := time.Now()
+
+	//////
+	// Run stage.
+	//////
 
 	// Store in as reference to be used as the input of the next stage.
 	retroFeedIn := in
@@ -200,32 +199,25 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 		// next stage ensuring that the data is processed sequentially.
 		rFI, err := proc.Run(tracedContext, retroFeedIn)
 		if err != nil {
-			// Observability: logging, metrics.
+			//////
+			// Observability: tracing, metrics, status, logging, etc.
+			//////
+
 			s.GetStatus().Set(status.Failed.String())
 
 			// Returns whatever is in `out` and the error.
 			//
 			// Don't need tracing, it's already traced.
-			return out, customapm.TraceError(
-				tracedContext,
-				customerror.New(
-					"failed to run processor",
-					customerror.WithError(err),
-					customerror.WithField(Type, s.Name),
-				),
-				s.GetLogger(),
-				s.GetCounterFailed(),
-			)
+			return nil, err
 		}
 
 		// Update the input with the output.
 		retroFeedIn = rFI
 
 		//////
-		// Observability: logging, metrics.
+		// Observability: tracing, metrics, status, logging, etc.
 		//////
 
-		// Increment the progress.
 		s.GetProgress().Add(1)
 
 		// Set the progress percentage.
@@ -241,46 +233,45 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 	mapOut, errs := concurrentloop.Map(tracedContext, retroFeedIn, s.Conversor)
 	if errs != nil {
-		// Observability: logging, metrics.
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
 		s.GetStatus().Set(status.Failed.String())
 
-		// Returns whatever is in `out` and the error.
-		//
-		// Observability: logging, metrics, and tracing.
-		return out, customapm.TraceError(
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
+
+		return nil, shared.OnErrorHandler(
 			tracedContext,
-			customerror.NewFailedToError(
-				"convert",
-				customerror.WithError(errs),
-				customerror.WithField(Type, s.Name),
-			),
+			s,
 			s.GetLogger(),
-			s.GetCounterFailed(),
+			"convert",
+			Type,
+			s.GetName(),
 		)
 	}
 
 	//////
-	// Observability: logging, metrics.
+	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	// Update status.
 	s.GetStatus().Set(status.Done.String())
 
-	// Increment the done counter.
 	s.GetCounterDone().Add(1)
 
-	// Set duration.
 	s.GetDuration().Set(time.Since(s.GetCreatedAt()).Milliseconds())
 
-	// Run onEvent callback.
 	if s.GetOnFinished() != nil {
 		s.GetOnFinished()(ctx, s, in, mapOut)
 	}
 
+	s.GetDuration().Set(time.Since(now).Milliseconds())
+
 	// Print the stage's status.
 	s.GetLogger().PrintWithOptions(
 		level.Debug,
-		"done",
+		status.Done.String(),
 		sypl.WithField("createdAt", s.GetCreatedAt().String()),
 		sypl.WithField("counterCreated", s.GetCounterCreated().String()),
 		sypl.WithField("counterDone", s.GetCounterDone().String()),
@@ -302,16 +293,18 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 // New returns a new stage.
 func New[In, Out any](
 	name string,
+	description string,
 	conversor concurrentloop.MapFunc[In, Out],
 	processors ...processor.IProcessor[In],
 ) (IStage[In, Out], error) {
 	s := &Stage[In, Out]{
-		Conversor: conversor,
-		Logger:    logging.Get().New(name).SetTags(Type, name),
-
-		CreatedAt:  time.Now(),
-		Name:       name,
+		Logger:     logging.Get().New(name).SetTags(Type, name),
 		Processors: processors,
+		Conversor:  conversor,
+
+		CreatedAt:   time.Now(),
+		Name:        name,
+		Description: description,
 
 		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
 		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
@@ -329,7 +322,12 @@ func New[In, Out any](
 		return nil, err
 	}
 
-	// Observability: logging, metrics.
+	//////
+	// Observability: tracing, metrics, status, logging, etc.
+	//////
+
+	s.GetStatus().Set(status.Created.String())
+
 	s.GetCounterCreated().Add(1)
 
 	s.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())

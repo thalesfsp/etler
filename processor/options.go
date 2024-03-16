@@ -13,7 +13,7 @@ type Func[T any] func(p IProcessor[T]) IProcessor[T]
 
 // OnFinished is the function that is called when a processor finishes its
 // execution.
-type OnFinished[T any] func(ctx context.Context, p IProcessor[T], originalIn []T, processedIn []T)
+type OnFinished[T any] func(ctx context.Context, p IProcessor[T], originalIn []T, processedOut []T)
 
 //////
 // Built-in options.

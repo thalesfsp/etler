@@ -2,6 +2,7 @@ package shared
 
 import (
 	"expvar"
+	"time"
 
 	"github.com/thalesfsp/sypl"
 )
@@ -37,4 +38,13 @@ type IMetrics interface {
 
 	// GetStatus returns the `Status` metric.
 	GetStatus() *expvar.String
+
+	// GetCreatedAt returns the created at time.
+	GetCreatedAt() time.Time
+
+	// GetDuration returns the `CounterDuration` of the stage.
+	GetDuration() *expvar.Int
+
+	// GetMetrics returns the stage's metrics.
+	GetMetrics() map[string]string
 }

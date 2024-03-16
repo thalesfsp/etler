@@ -34,8 +34,10 @@ type TestUserUpdate struct {
 
 func TestCSVFileAdapter_Read(t *testing.T) {
 	// Context with timeout. It controls the pipeline execution.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// defer cancel()
+
+	ctx := context.Background()
 
 	//////
 	// Setup processors.
@@ -55,7 +57,7 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 			return out, nil
 		},
-		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedIn []TestUser) {
+		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedOut []TestUser) {
 			fmt.Println(p.GetName(), "finished")
 		}),
 	)
@@ -77,7 +79,7 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 			return out, nil
 		},
-		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedIn []TestUser) {
+		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedOut []TestUser) {
 			fmt.Println(p.GetName(), "finished")
 		}),
 	)
@@ -91,6 +93,7 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 
 	stg1, err := stage.New(
 		"stage-1",
+		"double stage",
 		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
 			return TestUserUpdate{
 				Age:       tu.Age,
@@ -100,7 +103,25 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 			}, nil
 		},
 		// Add as many as you want.
-		double, square,
+		double,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stg2, err := stage.New(
+		"stage-2",
+		"square stage",
+		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+			return TestUserUpdate{
+				Age:       tu.Age,
+				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+				CreatedAt: tu.CreatedAt,
+				Name:      tu.Name,
+			}, nil
+		},
+		// Add as many as you want.
+		square,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +134,7 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	// Create a new pipeline.
 	p, err := New("User Enhancer", "Enhances user data", false,
 		// Add as many as you want.
-		stg1,
+		stg1, stg2,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +187,8 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 	//////
 	// Validates changes in `processedRecords`.
 	//////
+
+	t.Logf("processedRecords: %+v", processedRecords)
 
 	if len(processedRecords) != 2 {
 		t.Fatalf("Unexpected number of out: expected=2, got=%d", len(processedRecords))

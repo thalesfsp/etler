@@ -5,6 +5,8 @@ package pipeline
 import (
 	"context"
 	"expvar"
+	"fmt"
+	"time"
 
 	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/status"
@@ -40,9 +42,6 @@ type Pipeline[In any, Out any] struct {
 	// Name of the processor.
 	Name string `json:"name" validate:"required"`
 
-	// Progress of the pipeline.
-	Progress int `json:"progress"`
-
 	// OnFinished is the function that is called when a processor finishes its
 	// execution.
 	OnFinished OnFinished[In, Out] `json:"-"`
@@ -51,11 +50,16 @@ type Pipeline[In any, Out any] struct {
 	Stages []stage.IStage[In, Out] `json:"stages"`
 
 	// Metrics.
-	CounterCreated *expvar.Int    `json:"counterCreated"`
-	CounterRunning *expvar.Int    `json:"counterRunning"`
-	CounterFailed  *expvar.Int    `json:"counterFailed"`
-	CounterDone    *expvar.Int    `json:"counterDone"`
-	Status         *expvar.String `json:"status"`
+	CounterCreated *expvar.Int `json:"counterCreated"`
+	CounterRunning *expvar.Int `json:"counterRunning"`
+	CounterFailed  *expvar.Int `json:"counterFailed"`
+	CounterDone    *expvar.Int `json:"counterDone"`
+
+	CreatedAt       time.Time      `json:"createdAt"`
+	Duration        *expvar.Int    `json:"duration"`
+	Progress        *expvar.Int    `json:"progress"`
+	ProgressPercent *expvar.String `json:"progressPercent"`
+	Status          *expvar.String `json:"status"`
 }
 
 //////
@@ -131,10 +135,52 @@ func (p *Pipeline[In, Out]) GetType() string {
 	return Type
 }
 
+// GetCreatedAt returns the created at time.
+func (p *Pipeline[In, Out]) GetCreatedAt() time.Time {
+	return p.CreatedAt
+}
+
+// GetDuration returns the `CounterDuration` of the stage.
+func (p *Pipeline[In, Out]) GetDuration() *expvar.Int {
+	return p.Duration
+}
+
+// GetMetrics returns the stage's metrics.
+func (p *Pipeline[In, Out]) GetMetrics() map[string]string {
+	return map[string]string{
+		"createdAt":      p.GetCreatedAt().String(),
+		"counterCreated": p.GetCounterCreated().String(),
+		"counterDone":    p.GetCounterDone().String(),
+		"counterFailed":  p.GetCounterFailed().String(),
+		"counterRunning": p.GetCounterRunning().String(),
+		"duration":       p.GetDuration().String(),
+		"status":         p.GetStatus().String(),
+	}
+}
+
+// GetProgress returns the `CounterProgress` of the stage.
+func (p *Pipeline[In, Out]) GetProgress() *expvar.Int {
+	return p.Progress
+}
+
+// GetProgressPercent returns the `ProgressPercent` of the stage.
+func (p *Pipeline[In, Out]) GetProgressPercent() *expvar.String {
+	return p.ProgressPercent
+}
+
+// SetProgressPercent sets the `ProgressPercent` of the stage.
+func (p *Pipeline[In, Out]) SetProgressPercent() {
+	currentProgress := p.GetProgress().Value()
+	totalProgress := len(p.Stages)
+	percentage := float64(currentProgress) / float64(totalProgress) * 100
+
+	p.GetProgressPercent().Set(fmt.Sprintf("%d%%", int(percentage)))
+}
+
 // Run the pipeline.
 func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	//////
-	// Observability: logging, metrics, and tracing.
+	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
 	tracedContext, span := customapm.Trace(
@@ -147,12 +193,9 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	)
 	defer span.End()
 
-	// Initialize the output.
-	out := make([]Out, 0)
-
 	// Validation.
 	if in == nil {
-		return out, customapm.TraceError(
+		return nil, customapm.TraceError(
 			tracedContext,
 			customerror.NewRequiredError(
 				"input",
@@ -163,47 +206,83 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 		)
 	}
 
-	// Update the status.
 	p.GetStatus().Set(status.Runnning.String())
+
+	p.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+
+	now := time.Now()
 
 	//////
 	// Run the pipeline.
 	//////
+
+	// Store in as reference to be used as the input of the next stage.
+	retroFeedIn := make([]Out, 0)
 
 	// Iterate through the stages, passing the output of each stage
 	// as the input of the next stage.
 	for _, s := range p.Stages {
 		oS, err := s.Run(tracedContext, in)
 		if err != nil {
-			// Observability: logging, metrics.
-			p.GetStatus().Set(status.Failed.String())
+			//////
+			// Observability: tracing, metrics, status, logging, etc.
+			//////
 
-			// Returns whatever is in `out` and the error.
-			return out, customapm.TraceError(
+			return nil, shared.OnErrorHandler(
 				tracedContext,
-				customerror.New(
-					"failed to run stage",
-					customerror.WithError(err),
-					customerror.WithField(Type, p.Name),
-				),
-				s.GetLogger(),
-				s.GetCounterFailed(),
+				p,
+				p.GetLogger(),
+				"run stage",
+				Type,
+				p.GetName(),
 			)
 		}
 
-		out = append(out, oS...)
+		retroFeedIn = oS
+
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
+
+		// Increment the progress.
+		s.GetProgress().Add(1)
+
+		// Set the progress percentage.
+		//
+		// NOTE: MUST BE after increment the progress, as its internal calculation
+		// depends on that.
+		s.SetProgressPercent()
 	}
 
-	// Observability: logging, metrics.
+	//////
+	// Observability: tracing, metrics, status, logging, etc.
+	//////
+
 	p.GetStatus().Set(status.Done.String())
 
 	p.GetCounterDone().Add(1)
 
 	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, in, out)
+		p.GetOnFinished()(ctx, p, in, retroFeedIn)
 	}
 
-	return out, nil
+	p.GetDuration().Set(time.Since(now).Milliseconds())
+
+	p.GetLogger().PrintWithOptions(
+		level.Debug,
+		status.Done.String(),
+		sypl.WithField("createdAt", p.GetCreatedAt().String()),
+		sypl.WithField("counterCreated", p.GetCounterCreated().String()),
+		sypl.WithField("counterDone", p.GetCounterDone().String()),
+		sypl.WithField("counterFailed", p.GetCounterFailed().String()),
+		sypl.WithField("counterRunning", p.GetCounterRunning().String()),
+		sypl.WithField("duration", p.GetDuration().String()),
+		sypl.WithField("progress", p.GetProgress().String()),
+		sypl.WithField("progressPercent", p.GetProgressPercent().String()),
+		sypl.WithField("status", p.GetStatus().String()),
+	)
+
+	return retroFeedIn, nil
 }
 
 //////
@@ -222,17 +301,22 @@ func New[In, Out any](
 
 	p := &Pipeline[In, Out]{
 		ConcurrentStage: concurrentStage,
-		Logger:          logging.Get().New(name).SetTags(Type, name),
-		Name:            name,
-		Description:     description,
-		Progress:        0,
 		Stages:          stages,
+		Logger:          logging.Get().New(name).SetTags(Type, name),
+
+		CreatedAt:   time.Now(),
+		Name:        name,
+		Description: description,
 
 		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
 		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
 		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
 		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-		Status:         metrics.NewStringWithPattern(Type, name, status.Name),
+
+		Duration:        metrics.NewIntWithPattern(Type, name, "duration"),
+		Progress:        metrics.NewIntWithPattern(Type, name, "progress"),
+		ProgressPercent: metrics.NewStringWithPattern(Type, name, "progressPercent"),
+		Status:          metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
 	// Validation.
@@ -240,7 +324,12 @@ func New[In, Out any](
 		return nil, err
 	}
 
-	// Observability: logging, metrics.
+	//////
+	// Observability: tracing, metrics, status, logging, etc.
+	//////
+
+	p.GetStatus().Set(status.Created.String())
+
 	p.GetCounterCreated().Add(1)
 
 	p.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())

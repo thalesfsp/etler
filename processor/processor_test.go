@@ -23,7 +23,7 @@ func TestNew(t *testing.T) {
 
 			return out, nil
 		},
-		WithOnFinished(func(ctx context.Context, p IProcessor[int], originalIn []int, processedIn []int) {
+		WithOnFinished(func(ctx context.Context, p IProcessor[int], originalIn []int, processedOut []int) {
 			fmt.Println(p.GetName(), "finished")
 		}),
 	)

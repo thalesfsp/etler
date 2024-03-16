@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/thalesfsp/customerror"
+	"github.com/thalesfsp/status"
+	"github.com/thalesfsp/sypl"
+
+	"github.com/thalesfsp/etler/v2/internal/customapm"
 )
 
 // GenerateIDBasedOnContent generates MD5 hash (content-based) for message ID. Good to be used
@@ -123,4 +128,27 @@ func ReadAll(r io.Reader) ([]byte, error) {
 	}
 
 	return b, nil
+}
+
+// OnErrorHandler deals with observability (update status, logging, metrics)
+// when an processor, or stage, or the pipeline error.
+func OnErrorHandler(
+	tracedContext context.Context,
+	iMetric IMetrics,
+	l sypl.ISypl,
+	message, t, name string,
+) error {
+	// Observability: update the processor status, logging, metrics.
+	iMetric.GetStatus().Set(status.Failed.String())
+
+	return customapm.TraceError(
+		tracedContext,
+		customerror.NewFailedToError(
+			message,
+			customerror.WithError(tracedContext.Err()),
+			customerror.WithField(t, name),
+		),
+		l,
+		iMetric.GetCounterFailed(),
+	)
 }

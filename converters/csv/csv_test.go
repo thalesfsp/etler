@@ -12,7 +12,7 @@ import (
 )
 
 // Test struct.
-type Test []struct {
+type Test struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
@@ -24,9 +24,11 @@ func TestNew(t *testing.T) {
 
 	buf := new(strings.Builder)
 
-	csvConverter, err := New(converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[Test], r io.Reader, processed []Test) {
-		buf.WriteString(c.GetName() + " finished")
-	}))
+	csvConverter, err := New[Test](
+		converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[io.Reader, []Test], originalIn io.Reader, convertedOut []Test) {
+			buf.WriteString(c.GetName() + " finished")
+		}),
+	)
 	assert.NoError(t, err)
 
 	convertedData, err := csvConverter.Run(context.Background(), strings.NewReader(csvContent))

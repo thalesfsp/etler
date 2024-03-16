@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"context"
 	"sync/atomic"
 )
 
@@ -19,7 +18,3 @@ func SetPaused(val int32) {
 func GetPaused() int32 {
 	return atomic.LoadInt32(&Paused)
 }
-
-// Run is a function that transforms the data (`in`). It returns the
-// transformed data and any errors that occurred during processing.
-type Run[In any] func(ctx context.Context, in []In) (out []In, err error)

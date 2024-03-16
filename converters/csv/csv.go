@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/thalesfsp/customerror"
-	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/validation"
 
 	"github.com/thalesfsp/etler/v2/converter"
-	"github.com/thalesfsp/etler/v2/internal/customapm"
 )
 
 //////
@@ -21,61 +18,8 @@ import (
 const Name = "csv"
 
 // CSV definition.
-type CSV[T any] struct {
-	*converter.Converter[T] `json:"converter" validate:"required"`
-}
-
-//////
-// Methods.
-//////
-
-// Run the conversion.
-func (c *CSV[T]) Run(ctx context.Context, r io.Reader) (T, error) {
-	//////
-	// Observability: logging, metrics, and tracing.
-	//////
-
-	tracedContext, span := customapm.Trace(
-		ctx,
-		c.GetType(),
-		c.GetName(),
-		status.Runnning,
-		c.Logger,
-		c.CounterRunning,
-	)
-	defer span.End()
-
-	// Update the status.
-	c.GetStatus().Set(status.Runnning.String())
-
-	converted, err := Convert[T](r)
-	if err != nil {
-		// Observability: logging, metrics.
-		c.GetStatus().Set(status.Failed.String())
-
-		return *new(T), customapm.TraceError(
-			tracedContext,
-			customerror.NewFailedToError(
-				"convert",
-				customerror.WithError(err),
-				customerror.WithField(c.GetType(), c.GetName()),
-			),
-			c.GetLogger(),
-			c.GetCounterFailed(),
-		)
-	}
-
-	// Observability: logging, metrics.
-	c.GetStatus().Set(status.Done.String())
-
-	c.GetCounterDone().Add(1)
-
-	// Run onEvent callback.
-	if c.GetOnFinished() != nil {
-		c.GetOnFinished()(ctx, c, r, nil)
-	}
-
-	return converted, nil
+type CSV[Out any] struct {
+	converter.IConverter[io.Reader, Out] `json:"converter" validate:"required"`
 }
 
 //////
@@ -83,17 +27,31 @@ func (c *CSV[T]) Run(ctx context.Context, r io.Reader) (T, error) {
 //////
 
 // New creates a new converter.
-func New[T any](opts ...converter.Func[T]) (*CSV[T], error) {
+func New[Out any](
+	opts ...converter.Func[io.Reader, []Out],
+) (*CSV[[]Out], error) {
 	// Enforces IStorage interface implementation.
-	var _ converter.IConverter[T] = (*CSV[T])(nil)
+	var _ converter.IConverter[io.Reader, []Out] = (*CSV[[]Out])(nil)
 
-	conv, err := converter.New[T](Name, fmt.Sprintf("%s %s", Name, converter.Type))
+	conv, err := converter.New(
+		Name,
+		fmt.Sprintf("%s %s", Name, converter.Type),
+		func(ctx context.Context, in io.Reader) ([]Out, error) {
+			out, err := Convert[[]Out](in)
+			if err != nil {
+				return nil, err
+			}
+
+			return out, nil
+		},
+		opts...,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	csv := &CSV[T]{
-		Converter: conv,
+	csv := &CSV[[]Out]{
+		conv,
 	}
 
 	// Apply options.
