@@ -32,7 +32,7 @@ type TestUserUpdate struct {
 	Name      string    `json:"name"`
 }
 
-func TestCSVFileAdapter_Read(t *testing.T) {
+func TestPipeline_syncro(t *testing.T) {
 	// Context with timeout. It controls the pipeline execution.
 	// ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	// defer cancel()
@@ -194,3 +194,166 @@ func TestCSVFileAdapter_Read(t *testing.T) {
 		t.Fatalf("Unexpected number of out: expected=2, got=%d", len(processedRecords))
 	}
 }
+
+// func TestPipeline_concurrent(t *testing.T) {
+// 	// Context with timeout. It controls the pipeline execution.
+// 	// ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+// 	// defer cancel()
+
+// 	ctx := context.Background()
+
+// 	//////
+// 	// Setup processors.
+// 	//////
+
+// 	double, err := processor.New(
+// 		"double",
+// 		"doubles the input",
+// 		func(ctx context.Context, in []TestUser) ([]TestUser, error) {
+// 			out := make([]TestUser, len(in))
+
+// 			for i, v := range in {
+// 				out[i] = v
+// 				out[i].Name = v.Name + "-double"
+// 				out[i].Age = v.Age * 2
+// 			}
+
+// 			return out, nil
+// 		},
+// 		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedOut []TestUser) {
+// 			fmt.Println(p.GetName(), "finished")
+// 		}),
+// 	)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	square, err := processor.New(
+// 		"square",
+// 		"squares the input",
+// 		func(ctx context.Context, in []TestUser) ([]TestUser, error) {
+// 			out := make([]TestUser, len(in))
+
+// 			for i, v := range in {
+// 				out[i] = v
+// 				out[i].Name = v.Name + "-square"
+// 				out[i].Age = v.Age * v.Age
+// 			}
+
+// 			return out, nil
+// 		},
+// 		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[TestUser], originalIn []TestUser, processedOut []TestUser) {
+// 			fmt.Println(p.GetName(), "finished")
+// 		}),
+// 	)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	//////
+// 	// Setup stage.
+// 	//////
+
+// 	stg1, err := stage.New(
+// 		"stage-1",
+// 		"double stage",
+// 		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+// 			return TestUserUpdate{
+// 				Age:       tu.Age,
+// 				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+// 				CreatedAt: tu.CreatedAt,
+// 				Name:      tu.Name,
+// 			}, nil
+// 		},
+// 		// Add as many as you want.
+// 		double,
+// 	)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	stg2, err := stage.New(
+// 		"stage-2",
+// 		"square stage",
+// 		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+// 			return TestUserUpdate{
+// 				Age:       tu.Age,
+// 				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+// 				CreatedAt: tu.CreatedAt,
+// 				Name:      tu.Name,
+// 			}, nil
+// 		},
+// 		// Add as many as you want.
+// 		square,
+// 	)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	//////
+// 	// Setup pipeline.
+// 	//////
+
+// 	// Create a new pipeline.
+// 	p, err := New("User Enhancer", "Enhances user data", true,
+// 		// Add as many as you want.
+// 		stg1, stg2,
+// 	)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	//////
+// 	// Run the pipeline.
+// 	//////
+
+// 	records := []TestUser{
+// 		{
+// 			Name: "jack",
+// 			Age:  26,
+// 		},
+// 		{
+// 			Name: "john",
+// 			Age:  34,
+// 		},
+// 	}
+
+// 	processedRecords, err := p.Run(ctx, records)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	assert.Equal(t, int64(1), double.GetCounterCreated().Value())
+// 	assert.Equal(t, int64(1), double.GetCounterRunning().Value())
+// 	assert.Equal(t, int64(0), double.GetCounterFailed().Value())
+// 	assert.Equal(t, int64(1), double.GetCounterDone().Value())
+// 	assert.Equal(t, status.Done.String(), double.GetStatus().Value())
+
+// 	assert.Equal(t, int64(1), square.GetCounterCreated().Value())
+// 	assert.Equal(t, int64(1), square.GetCounterRunning().Value())
+// 	assert.Equal(t, int64(0), square.GetCounterFailed().Value())
+// 	assert.Equal(t, int64(1), square.GetCounterDone().Value())
+// 	assert.Equal(t, status.Done.String(), square.GetStatus().Value())
+
+// 	assert.Equal(t, int64(1), stg1.GetCounterCreated().Value())
+// 	assert.Equal(t, int64(1), stg1.GetCounterRunning().Value())
+// 	assert.Equal(t, int64(0), stg1.GetCounterFailed().Value())
+// 	assert.Equal(t, int64(1), stg1.GetCounterDone().Value())
+// 	assert.Equal(t, status.Done.String(), stg1.GetStatus().Value())
+
+// 	assert.Equal(t, int64(1), p.GetCounterCreated().Value())
+// 	assert.Equal(t, int64(1), p.GetCounterRunning().Value())
+// 	assert.Equal(t, int64(0), p.GetCounterFailed().Value())
+// 	assert.Equal(t, int64(1), p.GetCounterDone().Value())
+// 	assert.Equal(t, status.Done.String(), p.GetStatus().Value())
+
+// 	//////
+// 	// Validates changes in `processedRecords`.
+// 	//////
+
+// 	t.Logf("processedRecords: %+v", processedRecords)
+
+// 	if len(processedRecords) != 4 {
+// 		t.Fatalf("Unexpected number of out: expected=4, got=%d", len(processedRecords))
+// 	}
+// }

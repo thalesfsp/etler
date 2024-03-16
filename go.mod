@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.8.4
-	github.com/thalesfsp/concurrentloop v1.2.4
+	github.com/thalesfsp/concurrentloop v1.2.5
 	github.com/thalesfsp/customerror v1.2.1
 	github.com/thalesfsp/status v1.0.17
 	github.com/thalesfsp/sypl v1.9.18

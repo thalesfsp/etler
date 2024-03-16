@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/thalesfsp/concurrentloop"
 	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
@@ -219,11 +220,46 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	// Store in as reference to be used as the input of the next stage.
 	retroFeedIn := make([]Out, 0)
 
-	// Iterate through the stages, passing the output of each stage
-	// as the input of the next stage.
-	for _, s := range p.Stages {
-		oS, err := s.Run(tracedContext, in)
-		if err != nil {
+	if p.ConcurrentStage {
+		mapOut, errs := concurrentloop.Map(tracedContext, p.Stages, func(ctx context.Context, s stage.IStage[In, Out]) ([]Out, error) {
+			oS, err := s.Run(tracedContext, in)
+			if err != nil {
+				//////
+				// Observability: tracing, metrics, status, logging, etc.
+				//////
+
+				return nil, shared.OnErrorHandler(
+					tracedContext,
+					p,
+					p.GetLogger(),
+					"run stage",
+					Type,
+					p.GetName(),
+				)
+			}
+
+			//////
+			// Observability: tracing, metrics, status, logging, etc.
+			//////
+
+			// Increment the progress.
+			p.GetProgress().Add(1)
+
+			// Set the progress percentage.
+			//
+			// NOTE: MUST BE after increment the progress, as its internal calculation
+			// depends on that.
+			p.SetProgressPercent()
+
+			return oS, nil
+		})
+		if errs != nil {
+			//////
+			// Observability: tracing, metrics, status, logging, etc.
+			//////
+
+			p.GetStatus().Set(status.Failed.String())
+
 			//////
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
@@ -232,26 +268,48 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 				tracedContext,
 				p,
 				p.GetLogger(),
-				"run stage",
+				"convert",
 				Type,
 				p.GetName(),
 			)
 		}
 
-		retroFeedIn = oS
+		retroFeedIn = concurrentloop.Flatten2D(mapOut)
+	} else {
+		// Iterate through the stages, passing the output of each stage
+		// as the input of the next stage.
+		for _, s := range p.Stages {
+			oS, err := s.Run(tracedContext, in)
+			if err != nil {
+				//////
+				// Observability: tracing, metrics, status, logging, etc.
+				//////
 
-		//////
-		// Observability: tracing, metrics, status, logging, etc.
-		//////
+				return nil, shared.OnErrorHandler(
+					tracedContext,
+					p,
+					p.GetLogger(),
+					"run stage",
+					Type,
+					p.GetName(),
+				)
+			}
 
-		// Increment the progress.
-		s.GetProgress().Add(1)
+			retroFeedIn = oS
 
-		// Set the progress percentage.
-		//
-		// NOTE: MUST BE after increment the progress, as its internal calculation
-		// depends on that.
-		s.SetProgressPercent()
+			//////
+			// Observability: tracing, metrics, status, logging, etc.
+			//////
+
+			// Increment the progress.
+			p.GetProgress().Add(1)
+
+			// Set the progress percentage.
+			//
+			// NOTE: MUST BE after increment the progress, as its internal calculation
+			// depends on that.
+			p.SetProgressPercent()
+		}
 	}
 
 	//////
@@ -296,9 +354,6 @@ func New[In, Out any](
 	concurrentStage bool,
 	stages ...stage.IStage[In, Out],
 ) (IPipeline[In, Out], error) {
-	// WARN: Currently disabled.
-	concurrentStage = false
-
 	p := &Pipeline[In, Out]{
 		ConcurrentStage: concurrentStage,
 		Stages:          stages,

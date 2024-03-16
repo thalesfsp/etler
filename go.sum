@@ -106,6 +106,8 @@ github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcU
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/thalesfsp/concurrentloop v1.2.4 h1:Fzy9+k3mhmZWS0tTCZ2p0gA9gcEfFE0hHOrf1PdORnc=
 github.com/thalesfsp/concurrentloop v1.2.4/go.mod h1:G2j5MqMOuhqCmaK3WihdUYJQJ9okb/sPbst2/1Grlus=
+github.com/thalesfsp/concurrentloop v1.2.5 h1:5OjRODqhLC+gHUNT0dtCIfayT0CxHA8TqTFnkTuensQ=
+github.com/thalesfsp/concurrentloop v1.2.5/go.mod h1:G2j5MqMOuhqCmaK3WihdUYJQJ9okb/sPbst2/1Grlus=
 github.com/thalesfsp/customerror v1.2.1 h1:x/esaZFzL7EmM8vcWVmNKA+A+L2M7WRQeIXQC8sI0Io=
 github.com/thalesfsp/customerror v1.2.1/go.mod h1:m6qEsQiKU18PbtN5UTMLk9k6tTdBG/O/Op3FmnlUABE=
 github.com/thalesfsp/randomness v0.0.9 h1:RMyuxHtcARBdghmONa/zsAlyssJCqiEk6JS2fk7ewow=
