@@ -33,11 +33,9 @@ type TestUserUpdate struct {
 }
 
 func TestPipeline_syncro(t *testing.T) {
-	// Context with timeout. It controls the pipeline execution.
-	// ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	// defer cancel()
-
-	ctx := context.Background()
+	Context with timeout. It controls the pipeline execution.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	//////
 	// Setup processors.
