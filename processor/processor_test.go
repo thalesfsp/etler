@@ -9,37 +9,37 @@ import (
 	"github.com/thalesfsp/status"
 )
 
-func TestNew(t *testing.T) {
+func TestNew(toBeProcessed *testing.T) {
 	double, err := New(
 		"double",
 		"doubles the input",
-		func(ctx context.Context, in []int) ([]int, error) {
-			out := make([]int, len(in))
+		func(ctx context.Context, toBeProcessed []int) ([]int, error) {
+			processedOut := make([]int, len(toBeProcessed))
 
-			for i, v := range in {
-				out[i] = v
-				out[i] *= 2
+			for i, v := range toBeProcessed {
+				processedOut[i] = v
+				processedOut[i] *= 2
 			}
 
-			return out, nil
+			return processedOut, nil
 		},
 		WithOnFinished(func(ctx context.Context, p IProcessor[int], originalIn []int, processedOut []int) {
 			fmt.Println(p.GetName(), "finished")
 		}),
 	)
 	if err != nil {
-		t.Fatal(err)
+		toBeProcessed.Fatal(err)
 	}
 
-	out, err := double.Run(context.Background(), []int{1, 2, 3, 4, 5})
-	assert.NoError(t, err)
+	processedOut, err := double.Run(context.Background(), []int{1, 2, 3, 4, 5})
+	assert.NoError(toBeProcessed, err)
 
-	assert.Equal(t, []int{2, 4, 6, 8, 10}, out)
+	assert.Equal(toBeProcessed, []int{2, 4, 6, 8, 10}, processedOut)
 
 	// Should check if the metrics are working.
-	assert.Equal(t, int64(1), double.GetCounterCreated().Value())
-	assert.Equal(t, int64(1), double.GetCounterRunning().Value())
-	assert.Equal(t, int64(0), double.GetCounterFailed().Value())
-	assert.Equal(t, int64(1), double.GetCounterDone().Value())
-	assert.Equal(t, status.Done.String(), double.GetStatus().Value())
+	assert.Equal(toBeProcessed, int64(1), double.GetCounterCreated().Value())
+	assert.Equal(toBeProcessed, int64(1), double.GetCounterRunning().Value())
+	assert.Equal(toBeProcessed, int64(0), double.GetCounterFailed().Value())
+	assert.Equal(toBeProcessed, int64(1), double.GetCounterDone().Value())
+	assert.Equal(toBeProcessed, status.Done.String(), double.GetStatus().Value())
 }

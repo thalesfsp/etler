@@ -16,7 +16,7 @@ type Func[T any] func(p IProcessor[T]) IProcessor[T]
 type OnFinished[T any] func(ctx context.Context, p IProcessor[T], originalIn []T, processedOut []T)
 
 //////
-// Built-in options.
+// Built-toBeProcessed options.
 //////
 
 // WithOnFinished sets the OnFinished function.

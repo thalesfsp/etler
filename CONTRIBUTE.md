@@ -22,4 +22,4 @@ We follow a defined code style set in the `golangci-lint.yml` file. Please ensur
 
 ## Review process
 
-Your pull request will be reviewed by one of the maintainers of the project. If any changes are needed, we will request that you make them. Once the changes have been made and all tests are passing, your contribution will be merged into the main branch.
+Your pull request will be reviewed by one of the maintainers of the project. If any changes are needed, we will request that you make them. Once the changes have been made and all tests are passed, your contribution will be merged into the main branch.

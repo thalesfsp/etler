@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
-	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/level"
@@ -20,6 +19,7 @@ import (
 	"github.com/thalesfsp/etler/v2/internal/metrics"
 	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/etler/v2/stage"
+	"github.com/thalesfsp/etler/v2/task"
 )
 
 //////
@@ -30,11 +30,11 @@ import (
 const Type = "pipeline"
 
 // Pipeline definition.
-type Pipeline[In any, Out any] struct {
+type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	// Concurrent determines whether the stage should be run concurrently.
 	ConcurrentStage bool `json:"concurrentStage"`
 
-	// Logger is the pipeline logger.
+	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
 	// Description of the processor.
@@ -45,10 +45,10 @@ type Pipeline[In any, Out any] struct {
 
 	// OnFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[In, Out] `json:"-"`
+	OnFinished OnFinished[ProcessedData, ConvertedOut] `json:"-"`
 
-	// Stages to be used in the pipeline.
-	Stages []stage.IStage[In, Out] `json:"stages"`
+	// Stages to be used ProcessedData the pipeline.
+	Stages []stage.IStage[ProcessedData, ConvertedOut] `json:"stages"`
 
 	// Metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
@@ -68,47 +68,47 @@ type Pipeline[In any, Out any] struct {
 //////
 
 // GetDescription returns the `Description` of the pipeline.
-func (p *Pipeline[In, Out]) GetDescription() string {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetDescription() string {
 	return p.Description
 }
 
 // GetLogger returns the `Logger` of the pipeline.
-func (p *Pipeline[In, Out]) GetLogger() sypl.ISypl {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetLogger() sypl.ISypl {
 	return p.Logger
 }
 
 // GetName returns the `Name` of the pipeline.
-func (p *Pipeline[In, Out]) GetName() string {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetName() string {
 	return p.Name
 }
 
 // GetCounterCreated returns the `CounterCreated` of the processor.
-func (p *Pipeline[In, Out]) GetCounterCreated() *expvar.Int {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterCreated() *expvar.Int {
 	return p.CounterCreated
 }
 
 // GetCounterRunning returns the `CounterRunning` of the processor.
-func (p *Pipeline[In, Out]) GetCounterRunning() *expvar.Int {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterRunning() *expvar.Int {
 	return p.CounterRunning
 }
 
 // GetCounterFailed returns the `CounterFailed` of the processor.
-func (p *Pipeline[In, Out]) GetCounterFailed() *expvar.Int {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterFailed() *expvar.Int {
 	return p.CounterFailed
 }
 
 // GetCounterDone returns the `CounterDone` of the processor.
-func (p *Pipeline[In, Out]) GetCounterDone() *expvar.Int {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterDone() *expvar.Int {
 	return p.CounterDone
 }
 
 // GetStatus returns the `Status` metric.
-func (p *Pipeline[In, Out]) GetStatus() *expvar.String {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetStatus() *expvar.String {
 	return p.Status
 }
 
 // GetPaused returns the Paused status.
-func (p *Pipeline[In, Out]) GetPaused() status.Status {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	if shared.GetPaused() == 1 {
 		return status.Paused
 	}
@@ -117,37 +117,37 @@ func (p *Pipeline[In, Out]) GetPaused() status.Status {
 }
 
 // SetPaused sets the Paused status.
-func (p *Pipeline[In, Out]) SetPaused() {
+func (p *Pipeline[ProcessedData, ConvertedOut]) SetPaused() {
 	shared.SetPaused(1)
 }
 
 // GetOnFinished returns the `OnFinished` function.
-func (p *Pipeline[In, Out]) GetOnFinished() OnFinished[In, Out] {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetOnFinished() OnFinished[ProcessedData, ConvertedOut] {
 	return p.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
-func (p *Pipeline[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
+func (p *Pipeline[ProcessedData, ConvertedOut]) SetOnFinished(onFinished OnFinished[ProcessedData, ConvertedOut]) {
 	p.OnFinished = onFinished
 }
 
 // GetType returns the entity type.
-func (p *Pipeline[In, Out]) GetType() string {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetType() string {
 	return Type
 }
 
 // GetCreatedAt returns the created at time.
-func (p *Pipeline[In, Out]) GetCreatedAt() time.Time {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetCreatedAt() time.Time {
 	return p.CreatedAt
 }
 
 // GetDuration returns the `CounterDuration` of the stage.
-func (p *Pipeline[In, Out]) GetDuration() *expvar.Int {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetDuration() *expvar.Int {
 	return p.Duration
 }
 
 // GetMetrics returns the stage's metrics.
-func (p *Pipeline[In, Out]) GetMetrics() map[string]string {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      p.GetCreatedAt().String(),
 		"counterCreated": p.GetCounterCreated().String(),
@@ -159,18 +159,54 @@ func (p *Pipeline[In, Out]) GetMetrics() map[string]string {
 	}
 }
 
+// UpdateObservability updates the observability of the stage.
+func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
+	ctx context.Context,
+	now time.Time,
+	originalTask task.Task[ProcessedData, ConvertedOut],
+	retroFeedIn task.Task[ProcessedData, ConvertedOut],
+) {
+	//////
+	// Observability: tracing, metrics, status, logging, etc.
+	//////
+
+	p.GetStatus().Set(status.Done.String())
+
+	p.GetCounterDone().Add(1)
+
+	if p.GetOnFinished() != nil {
+		p.GetOnFinished()(ctx, p, originalTask, retroFeedIn)
+	}
+
+	p.GetDuration().Set(time.Since(now).Milliseconds())
+
+	p.GetLogger().PrintWithOptions(
+		level.Debug,
+		status.Done.String(),
+		sypl.WithField("createdAt", p.GetCreatedAt().String()),
+		sypl.WithField("counterCreated", p.GetCounterCreated().String()),
+		sypl.WithField("counterDone", p.GetCounterDone().String()),
+		sypl.WithField("counterFailed", p.GetCounterFailed().String()),
+		sypl.WithField("counterRunning", p.GetCounterRunning().String()),
+		sypl.WithField("duration", p.GetDuration().String()),
+		sypl.WithField("progress", p.GetProgress().String()),
+		sypl.WithField("progressPercent", p.GetProgressPercent().String()),
+		sypl.WithField("status", p.GetStatus().String()),
+	)
+}
+
 // GetProgress returns the `CounterProgress` of the stage.
-func (p *Pipeline[In, Out]) GetProgress() *expvar.Int {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetProgress() *expvar.Int {
 	return p.Progress
 }
 
 // GetProgressPercent returns the `ProgressPercent` of the stage.
-func (p *Pipeline[In, Out]) GetProgressPercent() *expvar.String {
+func (p *Pipeline[ProcessedData, ConvertedOut]) GetProgressPercent() *expvar.String {
 	return p.ProgressPercent
 }
 
 // SetProgressPercent sets the `ProgressPercent` of the stage.
-func (p *Pipeline[In, Out]) SetProgressPercent() {
+func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 	currentProgress := p.GetProgress().Value()
 	totalProgress := len(p.Stages)
 	percentage := float64(currentProgress) / float64(totalProgress) * 100
@@ -179,7 +215,7 @@ func (p *Pipeline[In, Out]) SetProgressPercent() {
 }
 
 // Run the pipeline.
-func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
+func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processedData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
@@ -194,14 +230,12 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	)
 	defer span.End()
 
-	// Validation.
-	if in == nil {
+	// Task initialization.
+	tsk, err := task.New[ProcessedData, ConvertedOut](processedData)
+	if err != nil {
 		return nil, customapm.TraceError(
 			tracedContext,
-			customerror.NewRequiredError(
-				"input",
-				customerror.WithField(Type, p.Name),
-			),
+			err,
 			p.GetLogger(),
 			p.GetCounterFailed(),
 		)
@@ -217,18 +251,21 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	// Run the pipeline.
 	//////
 
-	// Store in as reference to be used as the input of the next stage.
-	retroFeedIn := make([]Out, 0)
+	// Store as reference to be used ProcessedData the OnFinished function.
+	originalTask := tsk
+
+	// Store as reference to be used as the input of the next stage.
+	retroFeedIn := originalTask
 
 	if p.ConcurrentStage {
-		mapOut, errs := concurrentloop.Map(tracedContext, p.Stages, func(ctx context.Context, s stage.IStage[In, Out]) ([]Out, error) {
-			oS, err := s.Run(tracedContext, in)
+		stagesOut, errs := concurrentloop.Map(tracedContext, p.Stages, func(ctx context.Context, s stage.IStage[ProcessedData, ConvertedOut]) (task.Task[ProcessedData, ConvertedOut], error) {
+			stageOut, err := s.Run(tracedContext, originalTask)
 			if err != nil {
 				//////
 				// Observability: tracing, metrics, status, logging, etc.
 				//////
 
-				return nil, shared.OnErrorHandler(
+				return task.Task[ProcessedData, ConvertedOut]{}, shared.OnErrorHandler(
 					tracedContext,
 					p,
 					p.GetLogger(),
@@ -247,11 +284,11 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 			// Set the progress percentage.
 			//
-			// NOTE: MUST BE after increment the progress, as its internal calculation
-			// depends on that.
+			// NOTE: MUST BE after increment the progress, as its internal
+			// calculation depends on that.
 			p.SetProgressPercent()
 
-			return oS, nil
+			return stageOut, nil
 		})
 		if errs != nil {
 			//////
@@ -274,73 +311,58 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 			)
 		}
 
-		retroFeedIn = concurrentloop.Flatten2D(mapOut)
-	} else {
-		// Iterate through the stages, passing the output of each stage
-		// as the input of the next stage.
-		for _, s := range p.Stages {
-			oS, err := s.Run(tracedContext, in)
-			if err != nil {
-				//////
-				// Observability: tracing, metrics, status, logging, etc.
-				//////
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
 
-				return nil, shared.OnErrorHandler(
-					tracedContext,
-					p,
-					p.GetLogger(),
-					"run stage",
-					Type,
-					p.GetName(),
-				)
-			}
+		p.UpdateObservability(ctx, now, originalTask, retroFeedIn)
 
-			retroFeedIn = oS
+		return stagesOut, nil
+	}
 
+	// Iterate through the stages, passing the output of each stage
+	// as the input of the next stage.
+	for _, s := range p.Stages {
+		rFI, err := s.Run(tracedContext, retroFeedIn)
+		if err != nil {
 			//////
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
 
-			// Increment the progress.
-			p.GetProgress().Add(1)
-
-			// Set the progress percentage.
-			//
-			// NOTE: MUST BE after increment the progress, as its internal calculation
-			// depends on that.
-			p.SetProgressPercent()
+			return nil, shared.OnErrorHandler(
+				tracedContext,
+				p,
+				p.GetLogger(),
+				"run stage",
+				Type,
+				p.GetName(),
+			)
 		}
+
+		// Update reference to be used as the input of the next stage.
+		retroFeedIn = rFI
+
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
+
+		// Increment the progress.
+		p.GetProgress().Add(1)
+
+		// Set the progress percentage.
+		//
+		// NOTE: MUST BE after increment the progress, as its internal calculation
+		// depends on that.
+		p.SetProgressPercent()
 	}
 
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	p.GetStatus().Set(status.Done.String())
+	p.UpdateObservability(ctx, now, originalTask, retroFeedIn)
 
-	p.GetCounterDone().Add(1)
-
-	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, in, retroFeedIn)
-	}
-
-	p.GetDuration().Set(time.Since(now).Milliseconds())
-
-	p.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", p.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", p.GetCounterCreated().String()),
-		sypl.WithField("counterDone", p.GetCounterDone().String()),
-		sypl.WithField("counterFailed", p.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", p.GetCounterRunning().String()),
-		sypl.WithField("duration", p.GetDuration().String()),
-		sypl.WithField("progress", p.GetProgress().String()),
-		sypl.WithField("progressPercent", p.GetProgressPercent().String()),
-		sypl.WithField("status", p.GetStatus().String()),
-	)
-
-	return retroFeedIn, nil
+	return []task.Task[ProcessedData, ConvertedOut]{retroFeedIn}, nil
 }
 
 //////
@@ -348,13 +370,13 @@ func (p *Pipeline[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 //////
 
 // New returns a new pipeline.
-func New[In, Out any](
+func New[ProcessedData, ConvertedOut any](
 	name string,
 	description string,
 	concurrentStage bool,
-	stages ...stage.IStage[In, Out],
-) (IPipeline[In, Out], error) {
-	p := &Pipeline[In, Out]{
+	stages ...stage.IStage[ProcessedData, ConvertedOut],
+) (IPipeline[ProcessedData, ConvertedOut], error) {
+	p := &Pipeline[ProcessedData, ConvertedOut]{
 		ConcurrentStage: concurrentStage,
 		Stages:          stages,
 		Logger:          logging.Get().New(name).SetTags(Type, name),

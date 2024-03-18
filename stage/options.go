@@ -2,6 +2,8 @@ package stage
 
 import (
 	"context"
+
+	"github.com/thalesfsp/etler/v2/task"
 )
 
 //////
@@ -9,19 +11,19 @@ import (
 //////
 
 // Func allows to specify message's options.
-type Func[In, Out any] func(p IStage[In, Out]) IStage[In, Out]
+type Func[ProcessedData, ConvertedOut any] func(p IStage[ProcessedData, ConvertedOut]) IStage[ProcessedData, ConvertedOut]
 
 // OnFinished is the function that is called when a processor finishes its
 // execution.
-type OnFinished[In, Out any] func(ctx context.Context, p IStage[In, Out], in []In, processedOut []Out)
+type OnFinished[ProcessedData, ConvertedOut any] func(ctx context.Context, s IStage[ProcessedData, ConvertedOut], tskIn task.Task[ProcessedData, ConvertedOut], tskOut task.Task[ProcessedData, ConvertedOut])
 
 //////
 // Built-in options.
 //////
 
 // WithOnFinished sets the OnFinished function.
-func WithOnFinished[In, Out any](onFinished OnFinished[In, Out]) Func[In, Out] {
-	return func(p IStage[In, Out]) IStage[In, Out] {
+func WithOnFinished[ProcessedData, ConvertedOut any](onFinished OnFinished[ProcessedData, ConvertedOut]) Func[ProcessedData, ConvertedOut] {
+	return func(p IStage[ProcessedData, ConvertedOut]) IStage[ProcessedData, ConvertedOut] {
 		p.SetOnFinished(onFinished)
 
 		return p

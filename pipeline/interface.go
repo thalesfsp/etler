@@ -3,12 +3,14 @@ package pipeline
 import (
 	"context"
 
-	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/status"
+
+	"github.com/thalesfsp/etler/v2/internal/shared"
+	"github.com/thalesfsp/etler/v2/task"
 )
 
 // IPipeline defines what a `Pipeline` must do.
-type IPipeline[In, Out any] interface {
+type IPipeline[ProcessedData, ConvertedOut any] interface {
 	shared.IMeta
 
 	shared.IMetrics
@@ -20,11 +22,11 @@ type IPipeline[In, Out any] interface {
 	SetPaused()
 
 	// GetOnFinished returns the `OnFinished` function.
-	GetOnFinished() OnFinished[In, Out]
+	GetOnFinished() OnFinished[ProcessedData, ConvertedOut]
 
 	// SetOnFinished sets the `OnFinished` function.
-	SetOnFinished(onFinished OnFinished[In, Out])
+	SetOnFinished(onFinished OnFinished[ProcessedData, ConvertedOut])
 
 	// Run the pipeline.
-	Run(ctx context.Context, in []In) (out []Out, err error)
+	Run(ctx context.Context, processedData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error)
 }

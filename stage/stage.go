@@ -17,6 +17,7 @@ import (
 	"github.com/thalesfsp/etler/v2/internal/metrics"
 	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/etler/v2/processor"
+	"github.com/thalesfsp/etler/v2/task"
 )
 
 //////
@@ -27,14 +28,14 @@ import (
 const Type = "stage"
 
 // Stage definition.
-type Stage[In, Out any] struct {
+type Stage[ProcessingData, ConvertedData any] struct {
 	// Description of the stage.
 	Description string `json:"description"`
 
-	// Conversor to be used in the stage.
-	Conversor concurrentloop.MapFunc[In, Out] `json:"-" validate:"required"`
+	// Conversor to be used tsk the stage.
+	Conversor concurrentloop.MapFunc[ProcessingData, ConvertedData] `json:"-" validate:"required"`
 
-	// Logger is the pipeline logger.
+	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
 	// Name of the stage.
@@ -42,10 +43,10 @@ type Stage[In, Out any] struct {
 
 	// OnFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[In, Out] `json:"-"`
+	OnFinished OnFinished[ProcessingData, ConvertedData] `json:"-"`
 
-	// Processors to be run in the stage.
-	Processors []processor.IProcessor[In] `json:"processors" validate:"required,gt=0"`
+	// Processors to be run tsk the stage.
+	Processors []processor.IProcessor[ProcessingData] `json:"processors" validate:"required,gt=0"`
 
 	// Metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
@@ -65,52 +66,52 @@ type Stage[In, Out any] struct {
 //////
 
 // GetDescription returns the `Description` of the stage.
-func (s *Stage[In, Out]) GetDescription() string {
+func (s *Stage[ProcessingData, ConvertedData]) GetDescription() string {
 	return s.Description
 }
 
 // GetLogger returns the `Logger` of the stage.
-func (s *Stage[In, Out]) GetLogger() sypl.ISypl {
+func (s *Stage[ProcessingData, ConvertedData]) GetLogger() sypl.ISypl {
 	return s.Logger
 }
 
 // GetName returns the `Name` of the stage.
-func (s *Stage[In, Out]) GetName() string {
+func (s *Stage[ProcessingData, ConvertedData]) GetName() string {
 	return s.Name
 }
 
 // GetCounterCreated returns the `CounterCreated` of the stage.
-func (s *Stage[In, Out]) GetCounterCreated() *expvar.Int {
+func (s *Stage[ProcessingData, ConvertedData]) GetCounterCreated() *expvar.Int {
 	return s.CounterCreated
 }
 
 // GetCounterRunning returns the `CounterRunning` of the stage.
-func (s *Stage[In, Out]) GetCounterRunning() *expvar.Int {
+func (s *Stage[ProcessingData, ConvertedData]) GetCounterRunning() *expvar.Int {
 	return s.CounterRunning
 }
 
 // GetCounterFailed returns the `CounterFailed` of the stage.
-func (s *Stage[In, Out]) GetCounterFailed() *expvar.Int {
+func (s *Stage[ProcessingData, ConvertedData]) GetCounterFailed() *expvar.Int {
 	return s.CounterFailed
 }
 
 // GetCounterDone returns the `CounterDone` of the stage.
-func (s *Stage[In, Out]) GetCounterDone() *expvar.Int {
+func (s *Stage[ProcessingData, ConvertedData]) GetCounterDone() *expvar.Int {
 	return s.CounterDone
 }
 
 // GetProgress returns the `CounterProgress` of the stage.
-func (s *Stage[In, Out]) GetProgress() *expvar.Int {
+func (s *Stage[ProcessingData, ConvertedData]) GetProgress() *expvar.Int {
 	return s.Progress
 }
 
 // GetProgressPercent returns the `ProgressPercent` of the stage.
-func (s *Stage[In, Out]) GetProgressPercent() *expvar.String {
+func (s *Stage[ProcessingData, ConvertedData]) GetProgressPercent() *expvar.String {
 	return s.ProgressPercent
 }
 
 // SetProgressPercent sets the `ProgressPercent` of the stage.
-func (s *Stage[In, Out]) SetProgressPercent() {
+func (s *Stage[ProcessingData, ConvertedData]) SetProgressPercent() {
 	currentProgress := s.GetProgress().Value()
 	totalProgress := len(s.Processors)
 	percentage := float64(currentProgress) / float64(totalProgress) * 100
@@ -119,37 +120,37 @@ func (s *Stage[In, Out]) SetProgressPercent() {
 }
 
 // GetStatus returns the `Status` metric.
-func (s *Stage[In, Out]) GetStatus() *expvar.String {
+func (s *Stage[ProcessingData, ConvertedData]) GetStatus() *expvar.String {
 	return s.Status
 }
 
 // GetOnFinished returns the `OnFinished` function.
-func (s *Stage[In, Out]) GetOnFinished() OnFinished[In, Out] {
+func (s *Stage[ProcessingData, ConvertedData]) GetOnFinished() OnFinished[ProcessingData, ConvertedData] {
 	return s.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
-func (s *Stage[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
+func (s *Stage[ProcessingData, ConvertedData]) SetOnFinished(onFinished OnFinished[ProcessingData, ConvertedData]) {
 	s.OnFinished = onFinished
 }
 
 // GetType returns the entity type.
-func (s *Stage[In, Out]) GetType() string {
+func (s *Stage[ProcessingData, ConvertedData]) GetType() string {
 	return Type
 }
 
 // GetCreatedAt returns the created at time.
-func (s *Stage[In, Out]) GetCreatedAt() time.Time {
+func (s *Stage[ProcessingData, ConvertedData]) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
 // GetDuration returns the `CounterDuration` of the stage.
-func (s *Stage[In, Out]) GetDuration() *expvar.Int {
+func (s *Stage[ProcessingData, ConvertedData]) GetDuration() *expvar.Int {
 	return s.Duration
 }
 
 // GetMetrics returns the stage's metrics.
-func (s *Stage[In, Out]) GetMetrics() map[string]string {
+func (s *Stage[ProcessingData, ConvertedData]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":       s.GetCreatedAt().String(),
 		"counterCreated":  s.GetCounterCreated().String(),
@@ -164,7 +165,7 @@ func (s *Stage[In, Out]) GetMetrics() map[string]string {
 }
 
 // Run the transform function.
-func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
+func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task.Task[ProcessingData, ConvertedData]) (task.Task[ProcessingData, ConvertedData], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
@@ -190,8 +191,11 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	// Run stage.
 	//////
 
-	// Store in as reference to be used as the input of the next stage.
-	retroFeedIn := in
+	// Store as reference to be used in the OnFinished function.
+	originalTask := tsk
+
+	// Store as reference to be used as the input of the next processor.
+	retroFeedIn := originalTask.ProcessingData
 
 	// NOTE: It process the data sequentially.
 	for _, proc := range s.Processors {
@@ -205,10 +209,10 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 			s.GetStatus().Set(status.Failed.String())
 
-			// Returns whatever is in `out` and the error.
+			// Returns whatever is tsk `out` and the error.
 			//
 			// Don't need tracing, it's already traced.
-			return nil, err
+			return task.Task[ProcessingData, ConvertedData]{}, err
 		}
 
 		// Update the input with the output.
@@ -231,7 +235,7 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 	// Stage's conversor.
 	//////
 
-	mapOut, errs := concurrentloop.Map(tracedContext, retroFeedIn, s.Conversor)
+	convertedData, errs := concurrentloop.Map(tracedContext, retroFeedIn, s.Conversor)
 	if errs != nil {
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
@@ -242,7 +246,7 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
 
-		return nil, shared.OnErrorHandler(
+		return task.Task[ProcessingData, ConvertedData]{}, shared.OnErrorHandler(
 			tracedContext,
 			s,
 			s.GetLogger(),
@@ -262,10 +266,19 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 
 	s.GetDuration().Set(time.Since(s.GetCreatedAt()).Milliseconds())
 
+	//////
+	// Updates task's data.
+	//////
+
+	tsk.ProcessingData = retroFeedIn // TODO: Only do this IF p.Concurrent is true
+
+	tsk.ConvertedData = convertedData
+
 	if s.GetOnFinished() != nil {
-		s.GetOnFinished()(ctx, s, in, mapOut)
+		s.GetOnFinished()(ctx, s, originalTask, tsk)
 	}
 
+	// Set duration.
 	s.GetDuration().Set(time.Since(now).Milliseconds())
 
 	// Print the stage's status.
@@ -283,7 +296,7 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 		sypl.WithField("status", s.GetStatus().String()),
 	)
 
-	return mapOut, nil
+	return tsk, nil
 }
 
 //////
@@ -291,13 +304,13 @@ func (s *Stage[In, Out]) Run(ctx context.Context, in []In) ([]Out, error) {
 //////
 
 // New returns a new stage.
-func New[In, Out any](
+func New[ProcessingData, ConvertedData any](
 	name string,
 	description string,
-	conversor concurrentloop.MapFunc[In, Out],
-	processors ...processor.IProcessor[In],
-) (IStage[In, Out], error) {
-	s := &Stage[In, Out]{
+	conversor concurrentloop.MapFunc[ProcessingData, ConvertedData],
+	processors ...processor.IProcessor[ProcessingData],
+) (IStage[ProcessingData, ConvertedData], error) {
+	s := &Stage[ProcessingData, ConvertedData]{
 		Logger:     logging.Get().New(name).SetTags(Type, name),
 		Processors: processors,
 		Conversor:  conversor,

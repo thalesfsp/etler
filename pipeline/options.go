@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+
+	"github.com/thalesfsp/etler/v2/task"
 )
 
 //////
@@ -9,19 +11,19 @@ import (
 //////
 
 // Func allows to specify message's options.
-type Func[In, Out any] func(p IPipeline[In, Out]) IPipeline[In, Out]
+type Func[ProcessedData, ConvertedOut any] func(p IPipeline[ProcessedData, ConvertedOut]) IPipeline[ProcessedData, ConvertedOut]
 
 // OnFinished is the function that is called when a processor finishes its
 // execution.
-type OnFinished[In, Out any] func(ctx context.Context, p IPipeline[In, Out], in []In, processedOut []Out)
+type OnFinished[ProcessedData, ConvertedOut any] func(ctx context.Context, p IPipeline[ProcessedData, ConvertedOut], processedData task.Task[ProcessedData, ConvertedOut], convertedOut task.Task[ProcessedData, ConvertedOut])
 
 //////
-// Built-in options.
+// Built-ProcessedData options.
 //////
 
 // WithOnFinished sets the OnFinished function.
-func WithOnFinished[In, Out any](onFinished OnFinished[In, Out]) Func[In, Out] {
-	return func(p IPipeline[In, Out]) IPipeline[In, Out] {
+func WithOnFinished[ProcessedData, ConvertedOut any](onFinished OnFinished[ProcessedData, ConvertedOut]) Func[ProcessedData, ConvertedOut] {
+	return func(p IPipeline[ProcessedData, ConvertedOut]) IPipeline[ProcessedData, ConvertedOut] {
 		p.SetOnFinished(onFinished)
 
 		return p

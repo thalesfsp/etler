@@ -35,7 +35,7 @@ type Converter[In, Out any] struct {
 	// Conversion function.
 	Func Convert[In, Out] `json:"-"`
 
-	// Logger is the pipeline logger.
+	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
 	// Name of the stage.

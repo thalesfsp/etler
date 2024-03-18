@@ -23,27 +23,27 @@ import (
 // Type of the entity.
 const Type = "processor"
 
-// Transform is a function that transforms the data (`in`). It returns the
-// transformed data and any errors that occurred during processing.
-type Transform[In any] func(ctx context.Context, in []In) (out []In, err error)
+// Transform is a function that transforms (`processingData`) into
+// (`processingData`), returning any errors that occurred during processing.
+type Transform[ProcessedData any] func(ctx context.Context, processingData []ProcessedData) (processedOut []ProcessedData, err error)
 
 // Processor definition.
-type Processor[T any] struct {
-	// Description of the processor.
-	Description string `json:"description"`
-
+type Processor[ProcessingData any] struct {
 	// Transform function.
-	Func Transform[T] `json:"-"`
+	Func Transform[ProcessingData] `json:"-"`
 
-	// Logger is the pipeline logger.
+	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
 	// Name of the processor.
 	Name string `json:"name"`
 
+	// Description of the processor.
+	Description string `json:"description"`
+
 	// OnFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[T] `json:"-"`
+	OnFinished OnFinished[ProcessingData] `json:"-"`
 
 	// Metrics.
 	CounterCreated     *expvar.Int `json:"counterCreated"`
@@ -62,77 +62,77 @@ type Processor[T any] struct {
 //////
 
 // GetDescription returns the `Description` of the processor.
-func (p *Processor[T]) GetDescription() string {
+func (p *Processor[ProcessingData]) GetDescription() string {
 	return p.Description
 }
 
 // GetLogger returns the `Logger` of the processor.
-func (p *Processor[T]) GetLogger() sypl.ISypl {
+func (p *Processor[ProcessingData]) GetLogger() sypl.ISypl {
 	return p.Logger
 }
 
 // GetName returns the `Name` of the processor.
-func (p *Processor[T]) GetName() string {
+func (p *Processor[ProcessingData]) GetName() string {
 	return p.Name
 }
 
 // GetCounterCreated returns the `CounterCreated` metric.
-func (p *Processor[T]) GetCounterCreated() *expvar.Int {
+func (p *Processor[ProcessingData]) GetCounterCreated() *expvar.Int {
 	return p.CounterCreated
 }
 
 // GetCounterRunning returns the `CounterRunning` metric.
-func (p *Processor[T]) GetCounterRunning() *expvar.Int {
+func (p *Processor[ProcessingData]) GetCounterRunning() *expvar.Int {
 	return p.CounterRunning
 }
 
 // GetCounterFailed returns the `CounterFailed` metric.
-func (p *Processor[T]) GetCounterFailed() *expvar.Int {
+func (p *Processor[ProcessingData]) GetCounterFailed() *expvar.Int {
 	return p.CounterFailed
 }
 
 // GetCounterInterrupted returns the `CounterInterrupted` metric.
-func (p *Processor[T]) GetCounterInterrupted() *expvar.Int {
+func (p *Processor[ProcessingData]) GetCounterInterrupted() *expvar.Int {
 	return p.CounterInterrupted
 }
 
 // GetCounterDone returns the `CounterDone` metric.
-func (p *Processor[T]) GetCounterDone() *expvar.Int {
+func (p *Processor[ProcessingData]) GetCounterDone() *expvar.Int {
 	return p.CounterDone
 }
 
 // GetStatus returns the `Status` metric.
-func (p *Processor[T]) GetStatus() *expvar.String {
+func (p *Processor[ProcessingData]) GetStatus() *expvar.String {
 	return p.Status
 }
 
 // GetOnFinished returns the `OnFinished` function.
-func (p *Processor[T]) GetOnFinished() OnFinished[T] {
+func (p *Processor[ProcessingData]) GetOnFinished() OnFinished[ProcessingData] {
 	return p.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
-func (p *Processor[T]) SetOnFinished(onFinished OnFinished[T]) {
+func (p *Processor[ProcessingData]) SetOnFinished(onFinished OnFinished[ProcessingData]) {
 	p.OnFinished = onFinished
 }
 
 // GetType returns the entity type.
-func (p *Processor[T]) GetType() string {
+func (p *Processor[ProcessingData]) GetType() string {
 	return Type
 }
 
 // GetCreatedAt returns the created at time.
-func (p *Processor[T]) GetCreatedAt() time.Time {
+func (p *Processor[ProcessingData]) GetCreatedAt() time.Time {
 	return p.CreatedAt
 }
 
 // GetDuration returns the `CounterDuration` of the stage.
-func (p *Processor[T]) GetDuration() *expvar.Int {
+func (p *Processor[ProcessingData]) GetDuration() *expvar.Int {
 	return p.Duration
 }
 
 // GetMetrics returns the stage's metrics.
-func (p *Processor[T]) GetMetrics() map[string]string {
+func (p *Processor[ProcessingData]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      p.GetCreatedAt().String(),
 		"counterCreated": p.GetCounterCreated().String(),
@@ -145,7 +145,7 @@ func (p *Processor[T]) GetMetrics() map[string]string {
 }
 
 // Run the transform function.
-func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
+func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []ProcessingData) ([]ProcessingData, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
@@ -164,8 +164,8 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 
 	p.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
 
-	// originalIn is a copy of the input used for the callback.
-	originalIn := make([]T, len(t))
+	// Store as reference to be used in the OnFinished function.
+	originalProcessingData := processingData
 
 	//////
 	// Pause the pipeline if needed.
@@ -173,6 +173,10 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 
 	// TODO: Change this to channel.
 	for shared.GetPaused() == 1 {
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
+
 		p.GetCounterCreated()
 
 		// Update the status.
@@ -185,7 +189,10 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 
 		// If the context is done, do nothing, return.
 		case <-ctx.Done():
-			// Observability: update the processor status, logging, metrics.
+			//////
+			// Observability: tracing, metrics, status, logging, etc.
+			//////
+
 			return nil, shared.OnErrorHandler(
 				tracedContext,
 				p,
@@ -195,12 +202,15 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 				p.GetName(),
 			)
 		default:
-			// If the context isn't done, check the status every second.
+			// If the context isn'processingData done, check the status every second.
 			time.Sleep(1 * time.Second)
 
 			// If the status is no more paused, break the loop.
 			if shared.GetPaused() != 1 {
-				// Observability: update the processor status.
+				//////
+				// Observability: tracing, metrics, status, logging, etc.
+				//////
+
 				p.GetStatus().Set(status.Runnning.String())
 
 				break
@@ -214,7 +224,7 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 
 	now := time.Now()
 
-	o, err := p.Func(tracedContext, t)
+	o, err := p.Func(tracedContext, processingData)
 	if err != nil {
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
@@ -234,16 +244,16 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
+	// Run onEvent callback.
+	if p.GetOnFinished() != nil {
+		p.GetOnFinished()(ctx, p, originalProcessingData, processingData)
+	}
+
 	// Update status.
 	p.GetStatus().Set(status.Done.String())
 
 	// Increment the done counter.
 	p.GetCounterDone().Add(1)
-
-	// Run onEvent callback.
-	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, originalIn, t)
-	}
 
 	// Set duration.
 	p.GetDuration().Set(time.Since(now).Milliseconds())
@@ -269,12 +279,12 @@ func (p *Processor[T]) Run(ctx context.Context, t []T) ([]T, error) {
 //////
 
 // New returns a new processor.
-func New[T any](
+func New[ProcessingData any](
 	name, description string,
-	fn Transform[T],
-	opts ...Func[T],
-) (IProcessor[T], error) {
-	p := &Processor[T]{
+	fn Transform[ProcessingData],
+	opts ...Func[ProcessingData],
+) (IProcessor[ProcessingData], error) {
+	p := &Processor[ProcessingData]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 

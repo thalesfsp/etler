@@ -11,6 +11,7 @@ import (
 	"github.com/thalesfsp/status"
 
 	"github.com/thalesfsp/etler/v2/processor"
+	"github.com/thalesfsp/etler/v2/task"
 )
 
 func TestNew(t *testing.T) {
@@ -20,10 +21,10 @@ func TestNew(t *testing.T) {
 	double, err := processor.New(
 		"double",
 		"doubles the input",
-		func(ctx context.Context, in []int) ([]int, error) {
-			out := make([]int, len(in))
+		func(ctx context.Context, processedData []int) ([]int, error) {
+			out := make([]int, len(processedData))
 
-			for i, v := range in {
+			for i, v := range processedData {
 				out[i] = v
 				out[i] *= 2
 			}
@@ -44,10 +45,10 @@ func TestNew(t *testing.T) {
 	plusOne, err := processor.New(
 		"plusOne",
 		"adds 1 to the input",
-		func(ctx context.Context, in []int) ([]int, error) {
-			out := make([]int, len(in))
+		func(ctx context.Context, processedData []int) ([]int, error) {
+			out := make([]int, len(processedData))
 
-			for i, v := range in {
+			for i, v := range processedData {
 				out[i] = v
 				out[i]++
 			}
@@ -78,11 +79,13 @@ func TestNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := stg1.Run(context.Background(), []int{1, 2, 3, 4, 5})
+	tskOut, err := stg1.Run(context.Background(), task.Task[int, int]{
+		ProcessingData: []int{1, 2, 3, 4, 5},
+	})
 	assert.NoError(t, err)
 
 	// Validates output.
-	assert.Equal(t, []int{3, 5, 7, 9, 11}, out)
+	assert.Equal(t, []int{3, 5, 7, 9, 11}, tskOut.ConvertedData)
 
 	// Validates processors metrics.
 	assert.Equal(t, int64(1), double.GetCounterCreated().Value())
