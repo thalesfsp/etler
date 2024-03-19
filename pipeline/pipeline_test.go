@@ -8,8 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/status"
-	"github.com/thalesfsp/sypl"
-	"github.com/thalesfsp/sypl/level"
 
 	"github.com/thalesfsp/etler/v2/processor"
 	"github.com/thalesfsp/etler/v2/stage"
@@ -194,8 +192,6 @@ func TestPipeline_syncro(t *testing.T) {
 	assert.Equal(t, status.Done.String(), p.GetStatus().Value())
 
 	// Validates processed data.
-	sypl.NewDefault("test", level.Trace).PrintlnPretty(level.Info, outputTasks)
-
 	assert.Len(t, outputTasks, 1)
 
 	assert.Equal(t, "jack-double-square", outputTasks[0].ConvertedData[0].Name)
@@ -366,9 +362,8 @@ func TestPipeline_concurrent(t *testing.T) {
 	assert.Equal(t, status.Done.String(), p.GetStatus().Value())
 
 	// Validates processed data.
-	sypl.NewDefault("test", level.Trace).PrintlnPretty(level.Info, outputTasks)
-
 	assert.Len(t, outputTasks, 2)
+
 	assert.Equal(t, "jack-double", outputTasks[0].ConvertedData[0].Name)
 	assert.Equal(t, "john-double", outputTasks[0].ConvertedData[1].Name)
 	assert.Equal(t, 52, outputTasks[0].ConvertedData[0].Age)

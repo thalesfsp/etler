@@ -270,7 +270,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Updates task's data.
 	//////
 
-	tsk.ProcessingData = retroFeedIn // TODO: Only do this IF p.Concurrent is true
+	tsk.ProcessingData = retroFeedIn
 
 	tsk.ConvertedData = convertedData
 

@@ -19,23 +19,6 @@ type Task[ProcessingData, ConvertedData any] struct {
 }
 
 //////
-// Methods.
-//////
-
-// Initialize if empty, task's processing and converted data.
-//
-// TODO: Remove it.
-func (t Task[ProcessingData, ConvertedData]) Initialize() {
-	if t.ProcessingData == nil {
-		t.ProcessingData = make([]ProcessingData, 0)
-	}
-
-	if t.ConvertedData == nil {
-		t.ConvertedData = make([]ConvertedData, 0)
-	}
-}
-
-//////
 // Factory.
 //////
 
@@ -45,9 +28,8 @@ func New[ProcessingData, ConvertedData any](
 ) (Task[ProcessingData, ConvertedData], error) {
 	tsk := Task[ProcessingData, ConvertedData]{
 		ProcessingData: processingData,
+		ConvertedData:  make([]ConvertedData, 0),
 	}
-
-	tsk.Initialize()
 
 	// Validation.
 	if err := validation.Validate(&tsk); err != nil {

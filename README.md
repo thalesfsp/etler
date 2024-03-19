@@ -31,7 +31,7 @@ To use an adapter, you will need to create an instance of the adapter and pass i
 ```go
 client, err := elastic.NewClient(...)
 if err != nil {
-	// handle error
+    // handle error
 }
 elasticAdapter := NewElasticSearchAdapter(client, "index", "type")
 
@@ -47,8 +47,8 @@ In addition to the built-in adapters, you can also create your own custom adapte
 
 ```go
 type Adapter[C any] interface {
-	Read(ctx context.Context, query interface{}) ([]C, error)
-	Upsert(ctx context.Context, data []C) error
+    Read(ctx context.Context, query interface{}) ([]C, error)
+    Upsert(ctx context.Context, data []C) error
 }
 ```
 

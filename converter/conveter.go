@@ -192,7 +192,6 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 
 	// Run onEvent callback.
 	if c.GetOnFinished() != nil {
-		// TODO: Fix this.
 		c.GetOnFinished()(ctx, c, in, out)
 	}
 

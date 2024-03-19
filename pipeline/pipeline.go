@@ -1,5 +1,3 @@
-// TODO: Add metrics, error handling, logging, context, APM, APM transaction, etc.
-
 package pipeline
 
 import (
