@@ -12,6 +12,7 @@ import (
 	"github.com/thalesfsp/sypl/level"
 	"github.com/thalesfsp/validation"
 
+	"github.com/thalesfsp/etler/v2/converter"
 	"github.com/thalesfsp/etler/v2/internal/customapm"
 	"github.com/thalesfsp/etler/v2/internal/logging"
 	"github.com/thalesfsp/etler/v2/internal/metrics"
@@ -33,7 +34,7 @@ type Stage[ProcessingData, ConvertedData any] struct {
 	Description string `json:"description"`
 
 	// Conversor to be used tsk the stage.
-	Conversor concurrentloop.MapFunc[ProcessingData, ConvertedData] `json:"-" validate:"required"`
+	Conversor converter.IConverter[ProcessingData, ConvertedData] `json:"-" validate:"required"`
 
 	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
@@ -235,7 +236,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Stage's conversor.
 	//////
 
-	convertedData, errs := concurrentloop.Map(tracedContext, retroFeedIn, s.Conversor)
+	convertedData, errs := concurrentloop.Map(tracedContext, retroFeedIn, s.Conversor.Run)
 	if errs != nil {
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
@@ -307,7 +308,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 func New[ProcessingData, ConvertedData any](
 	name string,
 	description string,
-	conversor concurrentloop.MapFunc[ProcessingData, ConvertedData],
+	conversor converter.IConverter[ProcessingData, ConvertedData],
 	processors ...processor.IProcessor[ProcessingData],
 ) (IStage[ProcessingData, ConvertedData], error) {
 	s := &Stage[ProcessingData, ConvertedData]{

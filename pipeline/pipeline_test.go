@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/status"
 
+	"github.com/thalesfsp/etler/v2/converter"
 	"github.com/thalesfsp/etler/v2/processor"
 	"github.com/thalesfsp/etler/v2/stage"
 )
@@ -92,14 +93,17 @@ func TestPipeline_syncro(t *testing.T) {
 	stg1, err := stage.New(
 		"stage-1",
 		"double stage",
-		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
-			return TestUserUpdate{
-				Age:       tu.Age,
-				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
-				CreatedAt: tu.CreatedAt,
-				Name:      tu.Name,
-			}, nil
-		},
+		converter.MustDefault(
+			func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+				return TestUserUpdate{
+					Age:       tu.Age,
+					Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+					CreatedAt: tu.CreatedAt,
+					Name:      tu.Name,
+				}, nil
+			},
+		),
+
 		// Add as many as you want.
 		double,
 	)
@@ -110,14 +114,17 @@ func TestPipeline_syncro(t *testing.T) {
 	stg2, err := stage.New(
 		"stage-2",
 		"square stage",
-		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
-			return TestUserUpdate{
-				Age:       tu.Age,
-				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
-				CreatedAt: tu.CreatedAt,
-				Name:      tu.Name,
-			}, nil
-		},
+		converter.MustDefault(
+			func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+				return TestUserUpdate{
+					Age:       tu.Age,
+					Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+					CreatedAt: tu.CreatedAt,
+					Name:      tu.Name,
+				}, nil
+			},
+		),
+
 		// Add as many as you want.
 		square,
 	)
@@ -260,14 +267,17 @@ func TestPipeline_concurrent(t *testing.T) {
 	stg1, err := stage.New(
 		"stage-1",
 		"double stage",
-		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
-			return TestUserUpdate{
-				Age:       tu.Age,
-				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
-				CreatedAt: tu.CreatedAt,
-				Name:      tu.Name,
-			}, nil
-		},
+		converter.MustDefault(
+			func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+				return TestUserUpdate{
+					Age:       tu.Age,
+					Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+					CreatedAt: tu.CreatedAt,
+					Name:      tu.Name,
+				}, nil
+			},
+		),
+
 		// Add as many as you want.
 		double,
 	)
@@ -278,14 +288,17 @@ func TestPipeline_concurrent(t *testing.T) {
 	stg2, err := stage.New(
 		"stage-2",
 		"square stage",
-		func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
-			return TestUserUpdate{
-				Age:       tu.Age,
-				Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
-				CreatedAt: tu.CreatedAt,
-				Name:      tu.Name,
-			}, nil
-		},
+		converter.MustDefault(
+			func(ctx context.Context, tu TestUser) (TestUserUpdate, error) {
+				return TestUserUpdate{
+					Age:       tu.Age,
+					Code:      fmt.Sprintf("%s-%d", tu.Name, tu.Age),
+					CreatedAt: tu.CreatedAt,
+					Name:      tu.Name,
+				}, nil
+			},
+		),
+
 		// Add as many as you want.
 		square,
 	)

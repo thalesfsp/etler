@@ -65,3 +65,17 @@ func New[In any](
 
 	return csv, nil
 }
+
+// Must returns a new converter or panics if an error occurs.
+func MustNew[In any](
+	s storage.IStorage,
+	target string,
+	opts ...converter.Func[In, string],
+) *Storage[In] {
+	c, err := New(s, target, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return c
+}

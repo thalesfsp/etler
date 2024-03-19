@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/status"
 
+	"github.com/thalesfsp/etler/v2/converters/passthru"
 	"github.com/thalesfsp/etler/v2/processor"
 	"github.com/thalesfsp/etler/v2/task"
 )
@@ -69,9 +70,10 @@ func TestNew(t *testing.T) {
 	stg1, err := New(
 		"stage-1",
 		"main stage",
-		func(ctx context.Context, tu int) (int, error) {
-			return tu, nil
-		},
+
+		// Add as many as you want.
+		passthru.Must[int](),
+
 		// Add as many as you want.
 		double, plusOne,
 	)

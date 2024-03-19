@@ -38,7 +38,7 @@ type Converter[In, Out any] struct {
 	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the stage.
+	// Name of the converter.
 	Name string `json:"name" validate:"required"`
 
 	// OnFinished is the function that is called when a processor finishes its
@@ -70,7 +70,7 @@ func (c *Converter[In, Out]) GetLogger() sypl.ISypl {
 	return c.Logger
 }
 
-// GetName returns the `Name` of the stage.
+// GetName returns the `Name` of the converter.
 func (c *Converter[In, Out]) GetName() string {
 	return c.Name
 }
@@ -120,12 +120,12 @@ func (c *Converter[In, Out]) GetCreatedAt() time.Time {
 	return c.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the `CounterDuration` of the converter.
 func (c *Converter[In, Out]) GetDuration() *expvar.Int {
 	return c.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns the converter's metrics.
 func (c *Converter[In, Out]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      c.GetCreatedAt().String(),
@@ -198,7 +198,7 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	// Set duration.
 	c.GetDuration().Set(time.Since(now).Milliseconds())
 
-	// Print the stage's status.
+	// Print the converter's status.
 	c.GetLogger().PrintWithOptions(
 		level.Debug,
 		status.Done.String(),
@@ -218,7 +218,7 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 // Factory.
 //////
 
-// New returns a new stage.
+// New returns a new converter.
 func New[In, Out any](
 	name, description string,
 	fn Convert[In, Out],
@@ -262,4 +262,29 @@ func New[In, Out any](
 	c.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
 
 	return c, nil
+}
+
+// Default returns a new converter with name and description set to "converter".
+func Default[In, Out any](
+	fn Convert[In, Out],
+	opts ...Func[In, Out],
+) (IConverter[In, Out], error) {
+	c, err := New(Type, Type, fn, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return c, nil
+}
+
+func MustDefault[In, Out any](
+	fn Convert[In, Out],
+	opts ...Func[In, Out],
+) IConverter[In, Out] {
+	c, err := New(Type, Type, fn, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return c
 }

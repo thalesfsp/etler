@@ -1,10 +1,9 @@
-package csv
+package passthru
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/gocarina/gocsv"
 	"github.com/thalesfsp/validation"
 
 	"github.com/thalesfsp/etler/v2/converter"
@@ -15,11 +14,11 @@ import (
 //////
 
 // Name of the converter.
-const Name = "csv"
+const Name = "passthru"
 
-// CSV definition.
-type CSV[In any] struct {
-	converter.IConverter[In, string] `json:"converter" validate:"required"`
+// Passthru definition.
+type Passthru[In any] struct {
+	converter.IConverter[In, In] `json:"converter" validate:"required"`
 }
 
 //////
@@ -28,16 +27,16 @@ type CSV[In any] struct {
 
 // New creates a new converter.
 func New[In any](
-	opts ...converter.Func[[]In, string],
-) (*CSV[[]In], error) {
+	opts ...converter.Func[In, In],
+) (*Passthru[In], error) {
 	// Enforces interface implementation.
-	var _ converter.IConverter[[]In, string] = (*CSV[[]In])(nil)
+	var _ converter.IConverter[In, In] = (*Passthru[In])(nil)
 
 	conv, err := converter.New(
 		Name,
 		fmt.Sprintf("%s %s", Name, converter.Type),
-		func(tracedContext context.Context, in []In) (string, error) {
-			return gocsv.MarshalString(in)
+		func(ctx context.Context, tu In) (In, error) {
+			return tu, nil
 		},
 		opts...,
 	)
@@ -45,31 +44,31 @@ func New[In any](
 		return nil, err
 	}
 
-	csv := &CSV[[]In]{
+	passthru := &Passthru[In]{
 		conv,
 	}
 
 	// Apply options.
 	for _, opt := range opts {
-		opt(csv)
+		opt(passthru)
 	}
 
 	// Validation.
-	if err := validation.Validate(csv); err != nil {
+	if err := validation.Validate(passthru); err != nil {
 		return nil, err
 	}
 
-	return csv, nil
+	return passthru, nil
 }
 
 // Must returns a new converter or panics if an error occurs.
 func Must[In any](
-	opts ...converter.Func[[]In, string],
-) *CSV[[]In] {
-	csv, err := New(opts...)
+	opts ...converter.Func[In, In],
+) *Passthru[In] {
+	passthru, err := New(opts...)
 	if err != nil {
 		panic(err)
 	}
 
-	return csv
+	return passthru
 }
