@@ -3,6 +3,7 @@ module github.com/thalesfsp/etler/v2
 go 1.21
 
 require (
+	github.com/gocarina/gocsv v0.0.0-20231116093920-b87c2d0e983a
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.8.4
 	github.com/thalesfsp/concurrentloop v1.2.5

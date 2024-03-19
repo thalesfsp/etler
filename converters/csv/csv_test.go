@@ -2,7 +2,6 @@ package csv
 
 import (
 	"context"
-	"io"
 	"strings"
 	"testing"
 
@@ -18,25 +17,34 @@ type Test struct {
 }
 
 func TestNew(t *testing.T) {
-	csvContent := `id,name
-	1,John
-	2,Peter`
+	csvContent := `ID,Name
+1,John
+2,Peter
+`
+
+	tests := []Test{
+		{
+			ID:   "1",
+			Name: "John",
+		},
+		{
+			ID:   "2",
+			Name: "Peter",
+		},
+	}
 
 	buf := new(strings.Builder)
 
 	csvConverter, err := New[Test](
-		converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[io.Reader, []Test], originalIn io.Reader, convertedOut []Test) {
+		converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[[]Test, string], originalIn []Test, convertedOut string) {
 			buf.WriteString(c.GetName() + " finished")
 		}),
 	)
 	assert.NoError(t, err)
 
-	convertedData, err := csvConverter.Run(context.Background(), strings.NewReader(csvContent))
+	convertedData, err := csvConverter.Run(context.Background(), tests)
 	assert.NoError(t, err)
 
-	assert.Equal(t, "1", convertedData[0].ID)
-	assert.Equal(t, "John", convertedData[0].Name)
-	assert.Equal(t, "2", convertedData[1].ID)
-	assert.Equal(t, "Peter", convertedData[1].Name)
+	assert.Equal(t, csvContent, convertedData)
 	assert.Equal(t, "csv finished", buf.String())
 }
