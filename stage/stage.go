@@ -175,7 +175,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 		Type,
 		s.GetName(),
 		status.Runnning,
-		s.Logger,
+		s.GetLogger(),
 		s.CounterRunning,
 	)
 	defer span.End()
@@ -183,7 +183,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Update the status.
 	s.GetStatus().Set(status.Runnning.String())
 
-	s.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	s.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
 	now := time.Now()
 
@@ -343,7 +343,7 @@ func New[ProcessingData, ConvertedData any](
 
 	s.GetCounterCreated().Add(1)
 
-	s.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
+	s.GetLogger().PrintlnWithOptions(level.Trace, status.Created.String())
 
 	return s, nil
 }

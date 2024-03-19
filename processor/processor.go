@@ -155,14 +155,14 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		Type,
 		p.GetName(),
 		status.Runnning,
-		p.Logger,
+		p.GetLogger(),
 		p.CounterRunning,
 	)
 	defer span.End()
 
 	p.GetStatus().Set(status.Runnning.String())
 
-	p.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
 	// Store as reference to be used in the OnFinished function.
 	originalProcessingData := processingData
@@ -183,7 +183,7 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		p.GetStatus().Set(status.Paused.String())
 
 		// Notifiy user.
-		p.Logger.Debuglnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
+		p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
 
 		select {
 
@@ -320,7 +320,7 @@ func New[ProcessingData any](
 
 	p.GetCounterCreated().Add(1)
 
-	p.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
+	p.GetLogger().PrintlnWithOptions(level.Trace, status.Created.String())
 
 	return p, nil
 }

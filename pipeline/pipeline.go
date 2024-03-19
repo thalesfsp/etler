@@ -223,7 +223,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		Type,
 		p.GetName(),
 		status.Runnning,
-		p.Logger,
+		p.GetLogger(),
 		p.CounterRunning,
 	)
 	defer span.End()
@@ -241,7 +241,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 
 	p.GetStatus().Set(status.Runnning.String())
 
-	p.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
 	now := time.Now()
 
@@ -407,7 +407,7 @@ func New[ProcessedData, ConvertedOut any](
 
 	p.GetCounterCreated().Add(1)
 
-	p.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
+	p.GetLogger().PrintlnWithOptions(level.Trace, status.Created.String())
 
 	return p, nil
 }
