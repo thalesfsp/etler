@@ -108,8 +108,14 @@ github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcU
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/thalesfsp/concurrentloop v1.2.5 h1:5OjRODqhLC+gHUNT0dtCIfayT0CxHA8TqTFnkTuensQ=
 github.com/thalesfsp/concurrentloop v1.2.5/go.mod h1:G2j5MqMOuhqCmaK3WihdUYJQJ9okb/sPbst2/1Grlus=
+github.com/thalesfsp/configurer v1.2.3 h1:djdH38K8o0uwogumLGYpsQugfZacZXYBi5gtJ9AYMac=
+github.com/thalesfsp/configurer v1.2.3/go.mod h1:C6UJY8mEVvk4+oOWPJPdnvRh3LvfOb7/GtGVZCV/h5A=
 github.com/thalesfsp/customerror v1.2.1 h1:x/esaZFzL7EmM8vcWVmNKA+A+L2M7WRQeIXQC8sI0Io=
 github.com/thalesfsp/customerror v1.2.1/go.mod h1:m6qEsQiKU18PbtN5UTMLk9k6tTdBG/O/Op3FmnlUABE=
+github.com/thalesfsp/dal v0.2.9 h1:qw/C1yl4w4VK3yNBB4AYqCRYJL0UvEago+1FYXZIlOA=
+github.com/thalesfsp/dal v0.2.9/go.mod h1:zxoDbxrASnLxrqlQNWhdsY0p1bgOOWVC9EV3QYGXC8c=
+github.com/thalesfsp/params v0.1.8 h1:gFdAbYidQ3VvWcs6MrRnaD8UMQ+PiafUq1u3rJj41+E=
+github.com/thalesfsp/params v0.1.8/go.mod h1:IlZEAsCHABTH32neauCD9m5Rb2QijrXRfnXP95X0ghU=
 github.com/thalesfsp/randomness v0.0.9 h1:RMyuxHtcARBdghmONa/zsAlyssJCqiEk6JS2fk7ewow=
 github.com/thalesfsp/randomness v0.0.9/go.mod h1:AoCaxwcwR0k4HGkJKPc9txG0si5VHsFRIx03N90uXmA=
 github.com/thalesfsp/status v1.0.17 h1:9uo6QLBEk7n7AoUf3zD7DDGfj0JwRP+DI+ECF5yMuoE=
@@ -193,6 +199,8 @@ gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 h1:qIbj1fsPNlZgppZ+VLlY7N33
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v1 v1.0.0-20140924161607-9f9df34309c0/go.mod h1:WDnlLJ4WF5VGsH/HVa3CI79GS0ol3YnhVnKP89i0kNg=
 gopkg.in/yaml.v2 v2.2.1/go.mod h1:hI93XBmqTisBFMUTm0b8Fm+jr3Dg1NNxqwp+5A1VGuI=
+gopkg.in/yaml.v2 v2.4.0 h1:D8xgwECY7CYvx+Y2n4sBz93Jn9JRvxdiyyo8CTfuKaY=
+gopkg.in/yaml.v2 v2.4.0/go.mod h1:RDklbk79AGWmwhnvt/jBztapEOGDOx6ZbXqjP6csGnQ=
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=

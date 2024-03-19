@@ -1,4 +1,4 @@
-package csv
+package storage
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/thalesfsp/dal/memory"
+	"github.com/thalesfsp/params/retrieve"
 
 	"github.com/thalesfsp/etler/v2/converter"
 )
@@ -17,11 +19,6 @@ type Test struct {
 }
 
 func TestNew(t *testing.T) {
-	csvContent := `ID,Name
-1,John
-2,Peter
-`
-
 	tests := []Test{
 		{
 			ID:   "1",
@@ -35,16 +32,25 @@ func TestNew(t *testing.T) {
 
 	buf := new(strings.Builder)
 
+	memoryStorage, err := memory.New(context.Background())
+	assert.NoError(t, err)
+
 	csvConverter, err := New(
+		memoryStorage,
+		"test",
 		converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[[]Test, string], originalIn []Test, convertedOut string) {
 			buf.WriteString(c.GetName() + " finished")
 		}),
 	)
 	assert.NoError(t, err)
 
-	convertedData, err := csvConverter.Run(context.Background(), tests)
+	id, err := csvConverter.Run(context.Background(), tests)
 	assert.NoError(t, err)
 
-	assert.Equal(t, csvContent, convertedData)
-	assert.Equal(t, "csv finished", buf.String())
+	loadedData := []Test{}
+
+	assert.NoError(t, memoryStorage.Retrieve(context.Background(), id, "test", &loadedData, &retrieve.Retrieve{}))
+
+	assert.Equal(t, tests, loadedData)
+	assert.Equal(t, "storage finished", buf.String())
 }

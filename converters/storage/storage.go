@@ -1,13 +1,15 @@
-package csv
+package storage
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/gocarina/gocsv"
+	"github.com/thalesfsp/dal/storage"
+	"github.com/thalesfsp/params/create"
 	"github.com/thalesfsp/validation"
 
 	"github.com/thalesfsp/etler/v2/converter"
+	"github.com/thalesfsp/etler/v2/internal/shared"
 )
 
 //////
@@ -15,10 +17,10 @@ import (
 //////
 
 // Name of the converter.
-const Name = "csv"
+const Name = "storage"
 
-// CSV definition.
-type CSV[In any] struct {
+// Storage definition.
+type Storage[In any] struct {
 	converter.IConverter[In, string] `json:"converter" validate:"required"`
 }
 
@@ -26,18 +28,20 @@ type CSV[In any] struct {
 // Factory.
 //////
 
-// New creates a new converter.
+// New creates a new Storage converter.
 func New[In any](
-	opts ...converter.Func[[]In, string],
-) (*CSV[[]In], error) {
+	s storage.IStorage,
+	target string,
+	opts ...converter.Func[In, string],
+) (*Storage[In], error) {
 	// Enforces interface implementation.
-	var _ converter.IConverter[[]In, string] = (*CSV[[]In])(nil)
+	var _ converter.IConverter[In, string] = (*Storage[In])(nil)
 
 	conv, err := converter.New(
 		Name,
 		fmt.Sprintf("%s %s", Name, converter.Type),
-		func(tracedContext context.Context, in []In) (string, error) {
-			return gocsv.MarshalString(in)
+		func(tracedContext context.Context, in In) (string, error) {
+			return s.Create(tracedContext, shared.GenerateUUID(), target, in, &create.Create{})
 		},
 		opts...,
 	)
@@ -45,7 +49,7 @@ func New[In any](
 		return nil, err
 	}
 
-	csv := &CSV[[]In]{
+	csv := &Storage[In]{
 		conv,
 	}
 

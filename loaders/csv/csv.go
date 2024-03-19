@@ -30,7 +30,7 @@ type CSV[Out any] struct {
 func New[Out any](
 	opts ...loader.Func[io.Reader, []Out],
 ) (*CSV[[]Out], error) {
-	// Enforces IStorage interface implementation.
+	// Enforces interface implementation.
 	var _ loader.ILoader[io.Reader, []Out] = (*CSV[[]Out])(nil)
 
 	conv, err := loader.New(

@@ -24,7 +24,7 @@ func TestNew(t *testing.T) {
 
 	buf := new(strings.Builder)
 
-	csvLoader, err := New[Test](
+	csvLoader, err := New(
 		loader.WithOnFinished(func(ctx context.Context, c loader.ILoader[io.Reader, []Test], originalIn io.Reader, convertedOut []Test) {
 			buf.WriteString(c.GetName() + " finished")
 		}),
