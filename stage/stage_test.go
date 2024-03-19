@@ -21,10 +21,10 @@ func TestNew(t *testing.T) {
 	double, err := processor.New(
 		"double",
 		"doubles the input",
-		func(ctx context.Context, processedData []int) ([]int, error) {
-			out := make([]int, len(processedData))
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			out := make([]int, len(processingData))
 
-			for i, v := range processedData {
+			for i, v := range processingData {
 				out[i] = v
 				out[i] *= 2
 			}
@@ -45,10 +45,10 @@ func TestNew(t *testing.T) {
 	plusOne, err := processor.New(
 		"plusOne",
 		"adds 1 to the input",
-		func(ctx context.Context, processedData []int) ([]int, error) {
-			out := make([]int, len(processedData))
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			out := make([]int, len(processingData))
 
-			for i, v := range processedData {
+			for i, v := range processingData {
 				out[i] = v
 				out[i]++
 			}

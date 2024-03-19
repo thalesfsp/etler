@@ -13,7 +13,7 @@ import (
 	"github.com/thalesfsp/etler/v2/stage"
 )
 
-// Number is a simple struct to be used ProcessedData the tests.
+// Number is a simple struct to be used processingData the tests.
 type Number struct {
 	// Numbers to be processed.
 	Numbers []int `json:"numbers"`
@@ -44,10 +44,10 @@ func TestPipeline_syncro(t *testing.T) {
 	double, err := processor.New(
 		"double",
 		"doubles the input",
-		func(ctx context.Context, ProcessedData []TestUser) ([]TestUser, error) {
-			ConvertedOut := make([]TestUser, len(ProcessedData))
+		func(ctx context.Context, processingData []TestUser) ([]TestUser, error) {
+			ConvertedOut := make([]TestUser, len(processingData))
 
-			for i, v := range ProcessedData {
+			for i, v := range processingData {
 				ConvertedOut[i] = v
 				ConvertedOut[i].Name = v.Name + "-double"
 				ConvertedOut[i].Age = v.Age * 2
@@ -66,10 +66,10 @@ func TestPipeline_syncro(t *testing.T) {
 	square, err := processor.New(
 		"square",
 		"squares the input",
-		func(ctx context.Context, ProcessedData []TestUser) ([]TestUser, error) {
-			ConvertedOut := make([]TestUser, len(ProcessedData))
+		func(ctx context.Context, processingData []TestUser) ([]TestUser, error) {
+			ConvertedOut := make([]TestUser, len(processingData))
 
-			for i, v := range ProcessedData {
+			for i, v := range processingData {
 				ConvertedOut[i] = v
 				ConvertedOut[i].Name = v.Name + "-square"
 				ConvertedOut[i].Age = v.Age * v.Age
@@ -212,10 +212,10 @@ func TestPipeline_concurrent(t *testing.T) {
 	double, err := processor.New(
 		"double",
 		"doubles the input",
-		func(ctx context.Context, ProcessedData []TestUser) ([]TestUser, error) {
-			ConvertedOut := make([]TestUser, len(ProcessedData))
+		func(ctx context.Context, processingData []TestUser) ([]TestUser, error) {
+			ConvertedOut := make([]TestUser, len(processingData))
 
-			for i, v := range ProcessedData {
+			for i, v := range processingData {
 				ConvertedOut[i] = v
 				ConvertedOut[i].Name = v.Name + "-double"
 				ConvertedOut[i].Age = v.Age * 2
@@ -234,10 +234,10 @@ func TestPipeline_concurrent(t *testing.T) {
 	square, err := processor.New(
 		"square",
 		"squares the input",
-		func(ctx context.Context, ProcessedData []TestUser) ([]TestUser, error) {
-			ConvertedOut := make([]TestUser, len(ProcessedData))
+		func(ctx context.Context, processingData []TestUser) ([]TestUser, error) {
+			ConvertedOut := make([]TestUser, len(processingData))
 
-			for i, v := range ProcessedData {
+			for i, v := range processingData {
 				ConvertedOut[i] = v
 				ConvertedOut[i].Name = v.Name + "-square"
 				ConvertedOut[i].Age = v.Age * v.Age

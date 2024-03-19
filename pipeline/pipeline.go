@@ -213,7 +213,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 }
 
 // Run the pipeline.
-func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processedData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
+func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processingData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
@@ -229,7 +229,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	defer span.End()
 
 	// Task initialization.
-	tsk, err := task.New[ProcessedData, ConvertedOut](processedData)
+	tsk, err := task.New[ProcessedData, ConvertedOut](processingData)
 	if err != nil {
 		return nil, customapm.TraceError(
 			tracedContext,
