@@ -52,4 +52,4 @@ type Adapter[C any] interface {
 }
 ```
 
-You can then use your custom adapter just like any of the built-in adapters.
+You can then use your custom adapter just like any of the built-in adapter!
