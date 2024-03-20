@@ -174,6 +174,7 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 			tracedContext,
 			c,
 			c.GetLogger(),
+			err,
 			"process",
 			Type,
 			c.GetName(),

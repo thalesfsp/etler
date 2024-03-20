@@ -136,6 +136,7 @@ func OnErrorHandler(
 	tracedContext context.Context,
 	iMetric IMetrics,
 	l sypl.ISypl,
+	err error,
 	message, t, name string,
 ) error {
 	// Observability: update the processor status, logging, metrics.
@@ -145,7 +146,7 @@ func OnErrorHandler(
 		tracedContext,
 		customerror.NewFailedToError(
 			message,
-			customerror.WithError(tracedContext.Err()),
+			customerror.WithError(err),
 			customerror.WithField(t, name),
 		),
 		l,

@@ -251,6 +251,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 			tracedContext,
 			s,
 			s.GetLogger(),
+			errs,
 			"convert",
 			Type,
 			s.GetName(),
