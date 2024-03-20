@@ -32,9 +32,11 @@ type Storage[In any] struct {
 // New creates a new Storage processor.
 //
 // NOTE: Mininum concurrency is 1.
+// NOTE: idPrefix example: "news-"
 func New[In any](
 	s storage.IStorage,
 	concurrency int,
+	idPrefix string,
 	opts ...processor.Func[In],
 ) (*Storage[In], error) {
 	// Enforces interface implementation.
@@ -68,7 +70,7 @@ func New[In any](
 					// signature forces to return the same type as the input.
 					if _, err := s.Create(
 						tracedContext,
-						shared.GenerateUUID(),
+						idPrefix+shared.GenerateUUID(),
 						"etl",
 						in,
 						&create.Create{},
@@ -106,9 +108,10 @@ func New[In any](
 func Must[In any](
 	s storage.IStorage,
 	concurrency int,
+	idPrefix string,
 	opts ...processor.Func[In],
 ) *Storage[In] {
-	c, err := New(s, concurrency, opts...)
+	c, err := New(s, concurrency, idPrefix, opts...)
 	if err != nil {
 		panic(err)
 	}

@@ -151,7 +151,7 @@ func ExampleNew_storage_processor() {
 	}
 
 	// Storage processor, concurrency set to 1.
-	s, err := storage.New[Test](memoryStorage, 1)
+	s, err := storage.New[Test](memoryStorage, 1, "example-")
 	if err != nil {
 		log.Fatalln(err)
 	}

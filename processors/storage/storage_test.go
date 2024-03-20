@@ -38,6 +38,7 @@ func TestNew(t *testing.T) {
 	memoryProcessor, err := New(
 		memoryStorage,
 		1,
+		"test-",
 		processor.WithOnFinished(
 			func(ctx context.Context, c processor.IProcessor[Test], originalIn []Test, processedOut []Test) {
 				buf.WriteString(c.GetName() + " finished")
