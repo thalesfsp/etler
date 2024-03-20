@@ -53,11 +53,6 @@ func New[In any](
 		conv,
 	}
 
-	// Apply options.
-	for _, opt := range opts {
-		opt(csv)
-	}
-
 	// Validation.
 	if err := validation.Validate(csv); err != nil {
 		return nil, err
@@ -67,7 +62,7 @@ func New[In any](
 }
 
 // Must returns a new converter or panics if an error occurs.
-func MustNew[In any](
+func Must[In any](
 	s storage.IStorage,
 	target string,
 	opts ...converter.Func[In, string],

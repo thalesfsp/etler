@@ -3,15 +3,19 @@ package stage
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/thalesfsp/dal/memory"
+	"github.com/thalesfsp/params/list"
 	"github.com/thalesfsp/status"
 
 	"github.com/thalesfsp/etler/v2/converters/passthru"
 	"github.com/thalesfsp/etler/v2/processor"
+	"github.com/thalesfsp/etler/v2/processors/storage"
 	"github.com/thalesfsp/etler/v2/task"
 )
 
@@ -117,4 +121,101 @@ func TestNew(t *testing.T) {
 	// Validates onFinished function.
 	assert.Equal(t, true, strings.Contains(onFinishedTXTBuffer.String(), "double finished"))
 	assert.Equal(t, true, strings.Contains(onFinishedTXTBuffer.String(), "plusOne finished"))
+}
+
+// Test struct.
+type Test struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Demonstrates the usage of a stage with the storage
+// processor (memory storage).
+func ExampleNew_storage_processor() {
+	// Sample data.
+	tests := []Test{
+		{
+			ID:   "1",
+			Name: "John",
+		},
+		{
+			ID:   "2",
+			Name: "Peter",
+		},
+	}
+
+	// Memory storage from DAL.
+	memoryStorage, err := memory.New(context.Background())
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// Storage processor, concurrency set to 1.
+	s, err := storage.New[Test](memoryStorage, 1)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// Stage with the storage processor.
+	stg1, err := New(
+		"stage-1",
+		"main stage",
+
+		// Add as many as you want.
+		passthru.Must[Test](), // Pass-through, does nothing.
+
+		// Add as many as you want.
+		s,
+	)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// Run the stage passing the processing data as a task.
+	tasksOut, err := stg1.Run(context.Background(), task.Task[Test, Test]{
+		ProcessingData: tests,
+	})
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// String builder to contain the output of the stage and the memory storage.
+	var buf strings.Builder
+
+	// Iterate over tasksOut and write to the buffer.
+	for _, v := range tasksOut.ConvertedData {
+		buf.WriteString(fmt.Sprintf("%s %s\n", v.ID, v.Name))
+	}
+
+	// Get a list from the memory storage.
+	//
+	// NOTE: The usage of memory.ResponseList[Test] wrapper.
+	var fromMemory memory.ResponseList[Test]
+	if err := memoryStorage.List(context.Background(), "etl", &fromMemory, &list.List{}); err != nil {
+		log.Fatalln(err)
+	}
+
+	// Iterate over fromMemory so we can add to the buffer.
+	for _, v := range fromMemory.Items {
+		buf.WriteString(fmt.Sprintf("%s %s\n", v.ID, v.Name))
+	}
+
+	// Get the content of the buffer.
+	bufferContent := buf.String()
+
+	//////
+	// Check in the buffer if the name John and Peter appears 2 times.
+	//////
+
+	if strings.Count(bufferContent, "John") == 2 {
+		fmt.Println("John appears 2 times")
+	}
+
+	if strings.Count(bufferContent, "Peter") == 2 {
+		fmt.Println("Peter appears 2 times")
+	}
+
+	// Output:
+	// John appears 2 times
+	// Peter appears 2 times
 }
