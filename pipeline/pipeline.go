@@ -114,9 +114,20 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	return status.Runnning
 }
 
-// SetPaused sets the Paused status.
-func (p *Pipeline[ProcessedData, ConvertedOut]) SetPaused() {
-	shared.SetPaused(1)
+// Pause sets the Paused status.
+func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
+	if state {
+
+		p.GetStatus().Set(status.Paused.String())
+
+		shared.SetPaused(1)
+	}
+
+	// Updates the pipeline's status.
+	p.GetStatus().Set(status.Runnning.String())
+
+	// Updates the shared status.
+	shared.SetPaused(0)
 }
 
 // GetOnFinished returns the `OnFinished` function.

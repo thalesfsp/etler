@@ -177,8 +177,6 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
 
-		p.GetCounterCreated()
-
 		// Update the status.
 		p.GetStatus().Set(status.Paused.String())
 

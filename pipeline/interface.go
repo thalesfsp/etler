@@ -18,8 +18,8 @@ type IPipeline[ProcessedData, ConvertedOut any] interface {
 	// GetPaused returns the Paused status.
 	GetPaused() status.Status
 
-	// SetPaused sets the Paused status.
-	SetPaused()
+	// SetPause the pipeline.
+	SetPause(state bool)
 
 	// GetOnFinished returns the `OnFinished` function.
 	GetOnFinished() OnFinished[ProcessedData, ConvertedOut]
