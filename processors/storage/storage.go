@@ -60,7 +60,6 @@ func New[In any](
 		Name,
 		fmt.Sprintf("%s %s", Name, processor.Type),
 		func(tracedContext context.Context, processingData []In) ([]In, error) {
-
 			// Concurrently creates the data.
 			if _, errs := concurrentloop.Map(
 				tracedContext,
@@ -80,6 +79,7 @@ func New[In any](
 
 					return *new(In), nil
 				},
+				concurrentloopOpts...,
 			); len(errs) > 0 {
 				return nil, errs
 			}
