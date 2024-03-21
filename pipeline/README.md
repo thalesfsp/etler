@@ -40,7 +40,7 @@ When the `Run` method is called on a pipeline, it iterates through the stages, p
 
 11. **Thorough Testing**: The codebase includes comprehensive unit tests, ensuring the reliability and correctness of the pipeline functionality.
 
-12. **Production-Ready**: The pipeline package is production-ready, with a focus on performance, reliability, and scalability. It has been deployed and is in use by companies like Adobe.
+12. **Production-Ready**: The pipeline package is production-ready, with a focus on performance, reliability, and scalability.
 
 13. **Well-Documented**: The code is thoroughly documented, with clear comments explaining the purpose and functionality of each component. The package also includes usage examples and test cases.
 
