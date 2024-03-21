@@ -18,12 +18,12 @@ jobs:
       # Downloads a copy of the code in your repository before running CI tests
       - name: Check out repository code
         uses: actions/checkout@v3
-        
+
       - name: Setup Go environment
         uses: actions/setup-go@v4.0.0
         with:
           # The Go version to download (if necessary) and use. Supports semver spec and ranges.
-          go-version: 1.19
+          go-version: 1.21
           cache: true
 
       # golangci-lint is currently unsuable, performance is very poor.
