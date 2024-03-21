@@ -108,8 +108,8 @@ github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcU
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/thalesfsp/concurrentloop v1.2.5 h1:5OjRODqhLC+gHUNT0dtCIfayT0CxHA8TqTFnkTuensQ=
 github.com/thalesfsp/concurrentloop v1.2.5/go.mod h1:G2j5MqMOuhqCmaK3WihdUYJQJ9okb/sPbst2/1Grlus=
-github.com/thalesfsp/configurer v1.2.3 h1:djdH38K8o0uwogumLGYpsQugfZacZXYBi5gtJ9AYMac=
-github.com/thalesfsp/configurer v1.2.3/go.mod h1:C6UJY8mEVvk4+oOWPJPdnvRh3LvfOb7/GtGVZCV/h5A=
+github.com/thalesfsp/configurer v1.3.21 h1:e9hVBcB5DQMP98mmzEtiwR8QNgkRAjBOqzfGLU9d0wg=
+github.com/thalesfsp/configurer v1.3.21/go.mod h1:jhTumstf/htFEYjQLTeUwKl2mHUexOfhzNvP+jKslJE=
 github.com/thalesfsp/customerror v1.2.1 h1:x/esaZFzL7EmM8vcWVmNKA+A+L2M7WRQeIXQC8sI0Io=
 github.com/thalesfsp/customerror v1.2.1/go.mod h1:m6qEsQiKU18PbtN5UTMLk9k6tTdBG/O/Op3FmnlUABE=
 github.com/thalesfsp/dal v0.2.9 h1:qw/C1yl4w4VK3yNBB4AYqCRYJL0UvEago+1FYXZIlOA=

@@ -43,7 +43,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/procfs v0.13.0 // indirect
 	github.com/santhosh-tekuri/jsonschema v1.2.4 // indirect
-	github.com/thalesfsp/configurer v1.2.3 // indirect
+	github.com/thalesfsp/configurer v1.3.21 // indirect
 	github.com/thalesfsp/randomness v0.0.9 // indirect
 	go.elastic.co/fastjson v1.3.0 // indirect
 	go.opentelemetry.io/otel v1.24.0 // indirect
