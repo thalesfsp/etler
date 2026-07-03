@@ -16,8 +16,8 @@ import (
 	"github.com/thalesfsp/sypl"
 )
 
-// GenerateIDBasedOnContent generates MD5 hash (content-based) for message ID. Good to be used
-// to avoid duplicated messages.
+// GenerateIDBasedOnContent generates a SHA-1 hash (content-based) for message
+// ID. Good to be used to avoid duplicated messages.
 func GenerateIDBasedOnContent(ct string) string {
 	return fmt.Sprintf("%x", sha1.Sum([]byte(strings.Trim(ct, "\f\t\r\n "))))
 }
@@ -48,10 +48,21 @@ func ExtractID[T any](t T, idFieldName string) string {
 		v = v.Elem()
 	}
 
+	// Nil pointers dereference to an invalid value, and only structs have
+	// fields — anything else has no ID to extract.
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return ""
+	}
+
 	tType := v.Type()
 
 	for i := 0; i < tType.NumField(); i++ {
 		field := tType.Field(i)
+
+		// Unexported fields can't be read via Interface() — skip them.
+		if !field.IsExported() {
+			continue
+		}
 
 		if idFieldName != "" && strings.EqualFold(field.Name, idFieldName) {
 			return fmt.Sprintf("%v", v.Field(i).Interface())
@@ -64,7 +75,7 @@ func ExtractID[T any](t T, idFieldName string) string {
 
 	for i := 0; i < tType.NumField(); i++ {
 		field := tType.Field(i)
-		if field.Anonymous {
+		if field.Anonymous && field.IsExported() {
 			if id := ExtractID(v.Field(i).Interface(), idFieldName); id != "" {
 				return id
 			}

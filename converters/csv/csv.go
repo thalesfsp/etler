@@ -48,10 +48,8 @@ func New[In any](
 		conv,
 	}
 
-	// Apply options.
-	for _, opt := range opts {
-		opt(csv)
-	}
+	// NOTE: `opts` were already applied by `converter.New` — applying them
+	// again here would run each option twice.
 
 	// Validation.
 	if err := validation.Validate(csv); err != nil {

@@ -32,7 +32,7 @@ type Converter[In, Out any] struct {
 	Description string `json:"description"`
 
 	// Conversion function.
-	Func Convert[In, Out] `json:"-"`
+	Func Convert[In, Out] `json:"-" validate:"required"`
 
 	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
@@ -241,14 +241,14 @@ func New[In, Out any](
 		Status:   metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
-	// Validation.
-	if err := validation.Validate(c); err != nil {
-		return nil, err
-	}
-
 	// Apply options.
 	for _, opt := range opts {
 		opt(c)
+	}
+
+	// Validation.
+	if err := validation.Validate(c); err != nil {
+		return nil, err
 	}
 
 	//////
@@ -269,14 +269,11 @@ func Default[In, Out any](
 	fn Convert[In, Out],
 	opts ...Func[In, Out],
 ) (IConverter[In, Out], error) {
-	c, err := New(Type, Type, fn, opts...)
-	if err != nil {
-		panic(err)
-	}
-
-	return c, nil
+	return New(Type, Type, fn, opts...)
 }
 
+// MustDefault returns a new converter with name and description set to
+// "converter", panicking on error.
 func MustDefault[In, Out any](
 	fn Convert[In, Out],
 	opts ...Func[In, Out],

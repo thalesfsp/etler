@@ -47,10 +47,8 @@ func New[In any](
 		conv,
 	}
 
-	// Apply options.
-	for _, opt := range opts {
-		opt(passthru)
-	}
+	// NOTE: `opts` were already applied by `converter.New` — applying them
+	// again here would run each option twice.
 
 	// Validation.
 	if err := validation.Validate(passthru); err != nil {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"regexp"
 
+	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/etler/v2/internal/shared"
 )
 
@@ -30,6 +31,11 @@ func Load[Out any](in io.Reader) (Out, error) {
 	records, err := reader.ReadAll()
 	if err != nil {
 		return *new(Out), err
+	}
+
+	// A header row is required to map values to fields.
+	if len(records) == 0 {
+		return *new(Out), customerror.NewMissingError("CSV header row")
 	}
 
 	// Define a slice to hold the JSON objects

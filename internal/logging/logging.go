@@ -40,7 +40,7 @@ func Get() *Logger {
 	once.Do(func() {
 		// Setup logger with default sane values. Default outputs: stdout, and
 		// stderr.
-		l := sypl.NewDefault("pubsub", level.Error)
+		l := sypl.NewDefault("etler", level.Error)
 
 		//////
 		// Default outputs' processors.

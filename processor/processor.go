@@ -29,7 +29,7 @@ type Transform[ProcessedData any] func(ctx context.Context, processingData []Pro
 // Processor definition.
 type Processor[ProcessingData any] struct {
 	// Transform function.
-	Func Transform[ProcessingData] `json:"-"`
+	Func Transform[ProcessingData] `json:"-" validate:"required"`
 
 	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
@@ -200,7 +200,7 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
 
 		select {
-		// If the context is done, do nothing, return.
+		// If the context is done, stop waiting and return.
 		case <-ctx.Done():
 			//////
 			// Observability: tracing, metrics, status, logging, etc.
@@ -215,19 +215,14 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 				Type,
 				p.GetName(),
 			)
-		default:
-			// If the context isn'processingData done, check the status every second.
-			time.Sleep(1 * time.Second)
-
-			// If the status is no more paused, break the loop.
+		// Otherwise re-check the pause flag every second.
+		case <-time.After(1 * time.Second):
 			if shared.GetPaused() != 1 {
 				//////
 				// Observability: tracing, metrics, status, logging, etc.
 				//////
 
 				p.GetStatus().Set(status.Runnning.String())
-
-				break
 			}
 		}
 	}
@@ -259,9 +254,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	// Run onEvent callback.
+	// Run onEvent callback with the original input and the processed output.
 	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, originalProcessingData, processingData)
+		p.GetOnFinished()(ctx, p, originalProcessingData, o)
 	}
 
 	// Update status.
