@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,6 +40,28 @@ func TestPipeline_metadataAndOnFinishedOption(t *testing.T) {
 	_, err = p.Run(ctx, []int{1})
 	require.NoError(t, err)
 	assert.True(t, called, "the OnFinished set via option must run")
+}
+
+// Regression: after a CONCURRENT run, the final progress percentage must be
+// authoritative (the per-stage goroutines' updates can interleave mid-run).
+func TestPipeline_concurrent_finalProgressPercentIs100(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	p, err := New("concurrent-percent-audit", "final percent check", true,
+		newIdentityStage(t, "stage-percent-a"),
+		newIdentityStage(t, "stage-percent-b"),
+		newIdentityStage(t, "stage-percent-c"),
+	)
+	require.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		_, err := p.Run(ctx, []int{1, 2})
+		require.NoError(t, err)
+
+		require.Equal(t, "100%", p.GetProgressPercent().Value(),
+			"the final progress percentage must always land on 100%%")
+	}
 }
 
 // Edge case: the progress-percent guard for a bare pipeline without stages

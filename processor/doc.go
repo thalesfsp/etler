@@ -44,7 +44,7 @@
 //
 // 4. **Observability**: The processor package provides comprehensive observability features, including metrics, logging, and tracing, to monitor and debug the processor's execution.
 //
-// 5. **Metrics**: Processor metrics are exposed using the `expvar` package, allowing for easy integration with monitoring systems. Metrics include counters for created, running, failed, done, and interrupted processors, as well as duration.
+// 5. **Metrics**: Processor metrics are tracked with `expvar` variables (registered globally on `/debug/vars` only when `ETLER_METRICS_PUBLISH=true`; unpublished per-instance variables otherwise), allowing for easy integration with monitoring systems. Metrics include counters for created, running, failed, done, and interrupted processors, as well as duration.
 //
 // 6. **Logging**: The package utilizes the `sypl` library for structured logging, providing rich context and consistent log levels throughout the codebase. Log messages include relevant information such as processor status, counters, and duration.
 //

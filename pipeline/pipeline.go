@@ -265,7 +265,11 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		)
 	}
 
-	p.GetStatus().Set(status.Runnning.String())
+	// A paused pipeline keeps reporting paused — its processors are about to
+	// block on the pause controller.
+	if !p.pause.Paused() {
+		p.GetStatus().Set(status.Runnning.String())
+	}
 
 	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
@@ -330,6 +334,10 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
+
+		// Recompute the final percentage once: the per-stage goroutines'
+		// read-format-set sequences can interleave and leave a stale value.
+		p.SetProgressPercent()
 
 		p.UpdateObservability(ctx, now, originalTask, stagesOut)
 

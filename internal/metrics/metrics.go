@@ -38,27 +38,29 @@ func shouldPublish() bool {
 
 // NewString creates and initializes a new string metric. Unless publishing
 // is enabled (see PublishEnvVar), the metric is NOT registered globally.
+// A reused published metric is returned as-is — never re-initialized.
 func NewString(name string) *expvar.String {
-	counter := stringVar(name)
-
-	counter.Set(status.Created.String())
-
-	return counter
-}
-
-func stringVar(name string) *expvar.String {
 	if !shouldPublish() {
-		return new(expvar.String)
+		v := new(expvar.String)
+
+		v.Set(status.Created.String())
+
+		return v
 	}
 
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
+	// Reuse: do NOT clobber the shared metric's current value.
 	if v, ok := expvar.Get(name).(*expvar.String); ok {
 		return v
 	}
 
-	return expvar.NewString(name)
+	v := expvar.NewString(name)
+
+	v.Set(status.Created.String())
+
+	return v
 }
 
 // NewStringWithPattern creates and initializes a new expvar.String with a
@@ -79,15 +81,8 @@ func NewStringWithPattern(t, subject string, status status.Status) *expvar.Strin
 
 // NewInt creates and initializes a new int metric. Unless publishing is
 // enabled (see PublishEnvVar), the metric is NOT registered globally.
+// A reused published metric is returned as-is — never re-initialized.
 func NewInt(name string) *expvar.Int {
-	counter := intVar(name)
-
-	counter.Set(0)
-
-	return counter
-}
-
-func intVar(name string) *expvar.Int {
 	if !shouldPublish() {
 		return new(expvar.Int)
 	}
@@ -95,6 +90,7 @@ func intVar(name string) *expvar.Int {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
+	// Reuse: do NOT clobber the shared metric's current value.
 	if v, ok := expvar.Get(name).(*expvar.Int); ok {
 		return v
 	}

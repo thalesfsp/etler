@@ -36,7 +36,7 @@ When the `Run` method is called on a conveter, it executes the following steps:
 
 3. **Observability**: The conveters package provides comprehensive observability features, including tracing, metrics, status tracking, and logging. This enables effective monitoring and debugging of the conversion process.
 
-4. **Metrics**: Conveter metrics are exposed using the `expvar` package, allowing for easy integration with monitoring systems. Metrics include counters for created, running, failed, and done conveters, as well as duration and status.
+4. **Metrics**: Conveter metrics are tracked with `expvar` variables (registered globally on `/debug/vars` only when `ETLER_METRICS_PUBLISH=true`; unpublished per-instance variables otherwise), allowing for easy integration with monitoring systems. Metrics include counters for created, running, failed, and done conveters, as well as duration and status.
 
 5. **Callbacks**: The package supports an `OnFinished` callback function that is invoked after the conversion is complete. This callback receives the original input data and the converted output data, enabling custom post-conversion processing.
 

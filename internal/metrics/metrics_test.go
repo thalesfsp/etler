@@ -50,3 +50,27 @@ func TestMetrics_patternNames(t *testing.T) {
 	NewIntWithPattern("pipeline", "my-pipeline", status.Done)
 	assert.NotNil(t, expvar.Get("etler.pipeline.my-pipeline.done.counter"))
 }
+
+// Reusing a published metric must NOT clobber its accumulated value.
+func TestMetrics_publishReuse_doesNotResetValues(t *testing.T) {
+	t.Setenv(PublishEnvVar, "true")
+
+	// Relative to the current value: published vars persist for the process
+	// lifetime, so this test must be idempotent across -count reruns.
+	i1 := NewIntWithPattern("test", "no-clobber", status.Done)
+	base := i1.Value()
+	i1.Add(5)
+
+	i2 := NewIntWithPattern("test", "no-clobber", status.Done)
+	require.Same(t, i1, i2)
+	assert.Equal(t, base+5, i2.Value(),
+		"constructing a same-named entity must not reset the shared counter")
+
+	s1 := NewStringWithPattern("test", "no-clobber", status.Name)
+	s1.Set("something-live")
+
+	s2 := NewStringWithPattern("test", "no-clobber", status.Name)
+	require.Same(t, s1, s2)
+	assert.Equal(t, "something-live", s2.Value(),
+		"constructing a same-named entity must not reset the shared string")
+}

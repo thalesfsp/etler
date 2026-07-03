@@ -187,6 +187,10 @@ func TestPipeline_pause_holdsProcessing_untilResumed(t *testing.T) {
 		// Still paused, as expected.
 	}
 
+	// A paused pipeline must REPORT paused, even while Run is in flight.
+	assert.Equal(t, status.Paused.String(), p.GetStatus().Value(),
+		"Run must not flip a paused pipeline's status to running")
+
 	p.SetPause(false)
 
 	// After resuming, the pipeline must finish.
