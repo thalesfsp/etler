@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/customerror"
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v3/internal/logging"
 	"github.com/thalesfsp/etler/v3/internal/metrics"
 	"github.com/thalesfsp/status"

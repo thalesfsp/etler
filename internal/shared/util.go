@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/thalesfsp/customerror"
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v3/internal/customapm"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"

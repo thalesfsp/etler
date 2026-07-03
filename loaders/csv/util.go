@@ -5,7 +5,7 @@ import (
 	"io"
 	"regexp"
 
-	"github.com/thalesfsp/customerror"
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v3/internal/shared"
 )
 
