@@ -83,6 +83,21 @@ func TestExtractID_noID_returnsEmpty(t *testing.T) {
 	assert.Empty(t, ExtractID(noID{Name: "n"}, ""))
 }
 
+// Edge cases: nil pointers and non-struct values must not panic.
+func TestExtractID_nilPointerAndNonStruct_doNotPanic(t *testing.T) {
+	assert.NotPanics(t, func() {
+		var nilHolder *ExportedIDHolder
+
+		assert.Empty(t, ExtractID(nilHolder, ""))
+	})
+
+	assert.NotPanics(t, func() {
+		assert.Empty(t, ExtractID(123, ""))
+		assert.Empty(t, ExtractID("just-a-string", ""))
+		assert.Empty(t, ExtractID([]string{"a"}, ""))
+	})
+}
+
 // Edge cases for Flatten2D.
 func TestFlatten2D_edgeCases(t *testing.T) {
 	assert.Nil(t, Flatten2D[int](nil))

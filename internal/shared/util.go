@@ -48,6 +48,12 @@ func ExtractID[T any](t T, idFieldName string) string {
 		v = v.Elem()
 	}
 
+	// Nil pointers dereference to an invalid value, and only structs have
+	// fields — anything else has no ID to extract.
+	if !v.IsValid() || v.Kind() != reflect.Struct {
+		return ""
+	}
+
 	tType := v.Type()
 
 	for i := 0; i < tType.NumField(); i++ {

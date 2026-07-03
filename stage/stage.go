@@ -218,7 +218,13 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 		proc := proc
 
 		if proc.GetAsync() {
-			asyncIn := retroFeedIn
+			// The goroutine gets its own copy of the data. A slice-header
+			// snapshot isn't enough: a later sync processor mutating the
+			// slice in place would race with the async read on the shared
+			// backing array. Elements holding pointers still share the
+			// pointed-to data — processors must not mutate through them.
+			asyncIn := make([]ProcessingData, len(retroFeedIn))
+			copy(asyncIn, retroFeedIn)
 
 			go func() {
 				// Runs with the data snapshot taken at this processor's

@@ -323,6 +323,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
 
+		// NOTE: In concurrent mode stages don't retro-feed, so there is no
+		// single "final" task — OnFinished receives the original task as the
+		// retro-feed argument. The per-stage results are the returned slice.
 		p.UpdateObservability(ctx, now, originalTask, retroFeedIn)
 
 		return stagesOut, nil

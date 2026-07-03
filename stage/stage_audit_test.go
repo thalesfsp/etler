@@ -85,6 +85,68 @@ func TestStage_asyncThenSync_runsCorrectProcessor_noRace(t *testing.T) {
 	}
 }
 
+// Race: the async goroutine must own a COPY of the data, not just a copy of
+// the slice header — otherwise a later sync processor mutating the slice in
+// place races on the shared backing array. Run with -race.
+func TestStage_asyncSnapshot_isolatedFromInPlaceMutation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	asyncSum := make(chan int, 1)
+
+	reader, err := processor.New(
+		"async-reader",
+		"reads every element",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			sum := 0
+
+			for _, v := range processingData {
+				sum += v
+			}
+
+			asyncSum <- sum
+
+			return processingData, nil
+		},
+		processor.WithAsync[int](true),
+	)
+	require.NoError(t, err)
+
+	inPlace, err := processor.New(
+		"sync-in-place",
+		"mutates the slice in place",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			for i := range processingData {
+				processingData[i]++
+			}
+
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	stg, err := New(
+		"stage-async-snapshot-audit",
+		"async isolation from in-place mutation",
+		identityConverter(),
+		reader, inPlace,
+	)
+	require.NoError(t, err)
+
+	out, err := stg.Run(ctx, task.MustNew[int, int]([]int{1, 2, 3}))
+	require.NoError(t, err)
+	assert.Equal(t, []int{2, 3, 4}, out.ConvertedData)
+
+	select {
+	case sum := <-asyncSum:
+		// The async processor saw either the pristine snapshot (sum 6); it
+		// must never see a torn/mutated view of a shared array.
+		assert.Equal(t, 6, sum)
+	case <-time.After(5 * time.Second):
+		t.Fatal("async processor never ran")
+	}
+}
+
 // Bad path: a failing sync processor must mark the stage failed AND increment
 // the stage's failed counter.
 func TestStage_processorError_updatesFailureMetrics(t *testing.T) {
