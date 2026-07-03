@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/thalesfsp/dal/memory"
+	"github.com/thalesfsp/dal/v2/memory"
 	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/params/list"
+	"github.com/thalesfsp/params/v2/list"
 )
 
 // Test struct.

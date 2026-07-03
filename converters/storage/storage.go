@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/thalesfsp/dal/storage"
+	"github.com/thalesfsp/dal/v2/storage"
 	"github.com/thalesfsp/etler/v3/converter"
 	"github.com/thalesfsp/etler/v3/internal/shared"
-	"github.com/thalesfsp/params/create"
+	"github.com/thalesfsp/params/v2/create"
 	"github.com/thalesfsp/validation"
 )
 

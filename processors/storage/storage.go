@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/thalesfsp/concurrentloop"
-	"github.com/thalesfsp/dal/storage"
+	"github.com/thalesfsp/dal/v2/storage"
 	"github.com/thalesfsp/etler/v3/internal/shared"
 	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/params/create"
+	"github.com/thalesfsp/params/v2/create"
 	"github.com/thalesfsp/validation"
 )
 
