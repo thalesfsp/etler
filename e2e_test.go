@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/dal/memory"
+	"github.com/thalesfsp/dal/v2/memory"
 	"github.com/thalesfsp/etler/v3/converter"
 	"github.com/thalesfsp/etler/v3/converters/passthru"
 	loadercsv "github.com/thalesfsp/etler/v3/loaders/csv"
@@ -16,7 +16,7 @@ import (
 	"github.com/thalesfsp/etler/v3/processor"
 	storageproc "github.com/thalesfsp/etler/v3/processors/storage"
 	"github.com/thalesfsp/etler/v3/stage"
-	"github.com/thalesfsp/params/list"
+	"github.com/thalesfsp/params/v2/list"
 )
 
 type person struct {

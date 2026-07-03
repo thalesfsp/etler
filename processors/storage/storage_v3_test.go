@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/dal/storage"
-	"github.com/thalesfsp/params/create"
+	"github.com/thalesfsp/dal/v2/storage"
+	"github.com/thalesfsp/params/v2/create"
 )
 
 type v3Item struct {
