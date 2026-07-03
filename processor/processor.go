@@ -5,10 +5,10 @@ import (
 	"expvar"
 	"time"
 
-	"github.com/thalesfsp/etler/v2/internal/customapm"
-	"github.com/thalesfsp/etler/v2/internal/logging"
-	"github.com/thalesfsp/etler/v2/internal/metrics"
-	"github.com/thalesfsp/etler/v2/internal/shared"
+	"github.com/thalesfsp/etler/v3/internal/customapm"
+	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v3/internal/metrics"
+	"github.com/thalesfsp/etler/v3/internal/shared"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/level"
@@ -184,11 +184,12 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	originalProcessingData := processingData
 
 	//////
-	// Pause the pipeline if needed.
+	// Pause if the owning pipeline is paused.
 	//////
 
-	// TODO: Change this to channel.
-	for shared.GetPaused() == 1 {
+	// The pipeline injects its pause controller via the context. A processor
+	// running standalone (no controller in the context) never pauses.
+	if pc := shared.PauseFromCtx(tracedContext); pc != nil && pc.Paused() {
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
@@ -199,9 +200,8 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		// Notifiy user.
 		p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
 
-		select {
-		// If the context is done, stop waiting and return.
-		case <-ctx.Done():
+		// Blocks until resumed, or until the context is done.
+		if err := pc.Wait(tracedContext); err != nil {
 			//////
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
@@ -210,21 +210,18 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 				tracedContext,
 				p,
 				p.GetLogger(),
-				ctx.Err(),
+				err,
 				"process",
 				Type,
 				p.GetName(),
 			)
-		// Otherwise re-check the pause flag every second.
-		case <-time.After(1 * time.Second):
-			if shared.GetPaused() != 1 {
-				//////
-				// Observability: tracing, metrics, status, logging, etc.
-				//////
-
-				p.GetStatus().Set(status.Runnning.String())
-			}
 		}
+
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
+
+		p.GetStatus().Set(status.Runnning.String())
 	}
 
 	//////

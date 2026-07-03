@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/dal/memory"
-	"github.com/thalesfsp/etler/v2/converter"
+	"github.com/thalesfsp/etler/v3/converter"
 	"github.com/thalesfsp/params/retrieve"
 )
 

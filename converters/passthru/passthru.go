@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/thalesfsp/etler/v2/converter"
+	"github.com/thalesfsp/etler/v3/converter"
 	"github.com/thalesfsp/validation"
 )
 

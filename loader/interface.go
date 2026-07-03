@@ -3,7 +3,7 @@ package loader
 import (
 	"context"
 
-	"github.com/thalesfsp/etler/v2/internal/shared"
+	"github.com/thalesfsp/etler/v3/internal/shared"
 )
 
 // ILoader defines what a `Conveter` must do.

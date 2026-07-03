@@ -14,14 +14,16 @@ default: ci
 # Entries.
 ###
 
+COVERAGE_MIN := 90
+
 ci: lint test coverage
 
 coverage:
-	@go tool cover -func=coverage.out && echo "Coverage OK"
+	@go tool cover -func=coverage.out | tail -1 | awk -v min=$(COVERAGE_MIN) '{gsub("%","",$$3); if ($$3+0 < min) { printf "Coverage %.1f%% is BELOW the minimum %d%%\n", $$3, min; exit 1 } printf "Coverage OK: %.1f%% (minimum %d%%)\n", $$3, min }'
 
 deps:
 	@go install golang.org/x/tools/cmd/godoc@latest
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.51.2
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
 doc:
 ifndef HAS_GODOC

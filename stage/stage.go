@@ -2,18 +2,20 @@ package stage
 
 import (
 	"context"
+	"errors"
 	"expvar"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
-	"github.com/thalesfsp/etler/v2/converter"
-	"github.com/thalesfsp/etler/v2/internal/customapm"
-	"github.com/thalesfsp/etler/v2/internal/logging"
-	"github.com/thalesfsp/etler/v2/internal/metrics"
-	"github.com/thalesfsp/etler/v2/internal/shared"
-	"github.com/thalesfsp/etler/v2/processor"
-	"github.com/thalesfsp/etler/v2/task"
+	"github.com/thalesfsp/etler/v3/converter"
+	"github.com/thalesfsp/etler/v3/internal/customapm"
+	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v3/internal/metrics"
+	"github.com/thalesfsp/etler/v3/internal/shared"
+	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v3/task"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/level"
@@ -209,34 +211,38 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Store as reference to be used as the input of the next processor.
 	retroFeedIn := originalTask.ProcessingData
 
+	// Async processors are tracked and joined before the stage completes:
+	// the stage is not Done while they still run, and their failures fail
+	// the stage.
+	var (
+		asyncWG   sync.WaitGroup
+		asyncMu   sync.Mutex
+		asyncErrs []error
+	)
+
 	// NOTE: It process the data sequentially.
 	for _, proc := range s.Processors {
-		// Pin the loop variable and snapshot the data. Without this, the
-		// async goroutine below races with the loop: it may observe a later
-		// processor (Go <1.22 loop-variable semantics) and a `retroFeedIn`
-		// concurrently reassigned by subsequent sync processors.
-		proc := proc
-
 		if proc.GetAsync() {
-			// The goroutine gets its own copy of the data. A slice-header
-			// snapshot isn't enough: a later sync processor mutating the
-			// slice in place would race with the async read on the shared
-			// backing array. Elements holding pointers still share the
-			// pointed-to data — processors must not mutate through them.
+			// The goroutine gets its own copy of the data as it was at this
+			// processor's position in the chain. A slice-header snapshot
+			// isn't enough: a later sync processor mutating the slice in
+			// place would race with the async read on the shared backing
+			// array. Elements holding pointers still share the pointed-to
+			// data — processors must not mutate through them.
 			asyncIn := make([]ProcessingData, len(retroFeedIn))
 			copy(asyncIn, retroFeedIn)
 
+			asyncWG.Add(1)
+
 			go func() {
-				// Runs with the data snapshot taken at this processor's
-				// position in the chain.
-				//
+				defer asyncWG.Done()
+
 				// WARN: The output of the processing is not forwarded.
 				if _, err := proc.Run(tracedContext, asyncIn); err != nil {
-					//////
-					// Observability: tracing, metrics, status, logging, etc.
-					//////
+					asyncMu.Lock()
+					defer asyncMu.Unlock()
 
-					s.GetStatus().Set(status.Failed.String())
+					asyncErrs = append(asyncErrs, err)
 				}
 			}()
 		} else {
@@ -252,10 +258,15 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 				s.GetCounterFailed().Add(1)
 
+				// No goroutine may outlive the stage — join the async
+				// processors before failing.
+				asyncWG.Wait()
+
 				// Returns whatever is tsk `out` and the error.
 				//
 				// Don't need tracing, it's already traced.
-				return task.Task[ProcessingData, ConvertedData]{}, err
+				return task.Task[ProcessingData, ConvertedData]{},
+					errors.Join(append([]error{err}, asyncErrs...)...)
 			}
 
 			// Update the input with the output.
@@ -288,25 +299,42 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 		s.Conversor.Run,
 		concurrentloop.WithRemoveZeroValues(false),
 	)
+
+	// Join the async processors: the stage is not done while they run, and
+	// their failures fail the stage.
+	asyncWG.Wait()
+
+	asyncErr := errors.Join(asyncErrs...)
+
 	if errs != nil {
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
-		s.GetStatus().Set(status.Failed.String())
 
-		//////
-		// Observability: tracing, metrics, status, logging, etc.
-		//////
+		s.GetStatus().Set(status.Failed.String())
 
 		return task.Task[ProcessingData, ConvertedData]{}, shared.OnErrorHandler(
 			tracedContext,
 			s,
 			s.GetLogger(),
-			errs,
+			errors.Join(errs, asyncErr),
 			"convert",
 			Type,
 			s.GetName(),
 		)
+	}
+
+	if asyncErr != nil {
+		//////
+		// Observability: tracing, metrics, status, logging, etc.
+		//////
+
+		s.GetStatus().Set(status.Failed.String())
+
+		s.GetCounterFailed().Add(1)
+
+		// Already traced by the failing processor(s).
+		return task.Task[ProcessingData, ConvertedData]{}, asyncErr
 	}
 
 	//////

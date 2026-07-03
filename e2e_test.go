@@ -9,13 +9,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thalesfsp/dal/memory"
-	"github.com/thalesfsp/etler/v2/converter"
-	"github.com/thalesfsp/etler/v2/converters/passthru"
-	loadercsv "github.com/thalesfsp/etler/v2/loaders/csv"
-	"github.com/thalesfsp/etler/v2/pipeline"
-	"github.com/thalesfsp/etler/v2/processor"
-	storageproc "github.com/thalesfsp/etler/v2/processors/storage"
-	"github.com/thalesfsp/etler/v2/stage"
+	"github.com/thalesfsp/etler/v3/converter"
+	"github.com/thalesfsp/etler/v3/converters/passthru"
+	loadercsv "github.com/thalesfsp/etler/v3/loaders/csv"
+	"github.com/thalesfsp/etler/v3/pipeline"
+	"github.com/thalesfsp/etler/v3/processor"
+	storageproc "github.com/thalesfsp/etler/v3/processors/storage"
+	"github.com/thalesfsp/etler/v3/stage"
 	"github.com/thalesfsp/params/list"
 )
 
@@ -96,16 +96,26 @@ func TestE2E_csvToPipeline_sequential(t *testing.T) {
 
 	out, err := p.Run(ctx, records)
 	require.NoError(t, err)
-	require.Len(t, out, 1)
+
+	// v3: one task per stage, in stage order; the final task is last.
+	require.Len(t, out, 2)
+
+	final := out[len(out)-1]
 
 	// Sequential pipelines retro-feed ProcessingData stage to stage.
 	assert.Equal(t, []person{
 		{Name: "ALICE-ok", Age: 30},
 		{Name: "BOB-ok", Age: 0},
+	}, final.ConvertedData)
+
+	// The intermediate stage's results are exposed too.
+	assert.Equal(t, []person{
+		{Name: "ALICE", Age: 30},
+		{Name: "BOB", Age: 0},
 	}, out[0].ConvertedData)
 
-	assert.NotEmpty(t, out[0].ID)
-	assert.NotEmpty(t, out[0].CreatedAt)
+	assert.NotEmpty(t, final.ID)
+	assert.NotEmpty(t, final.CreatedAt)
 }
 
 // E2E happy path: pipeline with a storage processor persisting into the DAL

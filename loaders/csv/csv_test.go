@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/thalesfsp/etler/v2/loader"
+	"github.com/thalesfsp/etler/v3/loader"
 )
 
 // Test struct.

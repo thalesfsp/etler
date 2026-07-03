@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v2/internal/shared"
+	"github.com/thalesfsp/etler/v3/internal/shared"
 	"github.com/thalesfsp/status"
 )
 
@@ -100,26 +100,30 @@ func TestProcessor_pause_holdsAndResumes(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	shared.SetPaused(1)
-	defer shared.SetPaused(0)
+	// The pause controller reaches the processor via the context — exactly
+	// how a pipeline injects it.
+	pc := shared.NewPauseController()
+	pc.Pause()
+
+	pausedCtx := shared.ContextWithPause(ctx, pc)
 
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := witness.Run(ctx, []int{1})
+		_, err := witness.Run(pausedCtx, []int{1})
 		done <- err
 	}()
 
 	select {
 	case <-ran:
 		t.Fatal("processor ran while paused")
-	case <-time.After(1300 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		// Still paused, as expected.
 	}
 
 	assert.Equal(t, status.Paused.String(), witness.GetStatus().Value())
 
-	shared.SetPaused(0)
+	pc.Resume()
 
 	select {
 	case <-ran:
@@ -129,6 +133,26 @@ func TestProcessor_pause_holdsAndResumes(t *testing.T) {
 
 	require.NoError(t, <-done)
 	assert.Equal(t, status.Done.String(), witness.GetStatus().Value())
+}
+
+// Edge case: without a pause controller in the context (standalone use), the
+// processor never pauses.
+func TestProcessor_noPauseController_runsImmediately(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	identity, err := New(
+		"no-pause-audit",
+		"identity",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	out, err := identity.Run(ctx, []int{1})
+	require.NoError(t, err)
+	assert.Equal(t, []int{1}, out)
 }
 
 // Bad path: cancelling the context while paused must unblock Run with an
@@ -145,13 +169,15 @@ func TestProcessor_pause_ctxCancel_unblocks(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	shared.SetPaused(1)
-	defer shared.SetPaused(0)
+	pc := shared.NewPauseController()
+	pc.Pause()
+
+	pausedCtx := shared.ContextWithPause(ctx, pc)
 
 	done := make(chan error, 1)
 
 	go func() {
-		_, err := blocked.Run(ctx, []int{1})
+		_, err := blocked.Run(pausedCtx, []int{1})
 		done <- err
 	}()
 

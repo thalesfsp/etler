@@ -17,21 +17,20 @@ jobs:
     steps:
       # Downloads a copy of the code in your repository before running CI tests
       - name: Check out repository code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Go environment
-        uses: actions/setup-go@v4.0.0
+        uses: actions/setup-go@v5
         with:
           # The Go version to download (if necessary) and use. Supports semver spec and ranges.
-          go-version: 1.21
+          go-version: "1.22"
           cache: true
 
-      # golangci-lint is currently unsuable, performance is very poor.
-      # - name: Setup golangci-lint
-      #   uses: golangci/golangci-lint-action@v3.1.0
-      #   with:
-      #     version: v1.51.2
-      #     args: --timeout 10m -v -c .golangci.yml
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          args: --timeout 10m -c .golangci.yml
 
       - name: Test
         run: |

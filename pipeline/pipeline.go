@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
-	"github.com/thalesfsp/etler/v2/internal/customapm"
-	"github.com/thalesfsp/etler/v2/internal/logging"
-	"github.com/thalesfsp/etler/v2/internal/metrics"
-	"github.com/thalesfsp/etler/v2/internal/shared"
-	"github.com/thalesfsp/etler/v2/stage"
-	"github.com/thalesfsp/etler/v2/task"
+	"github.com/thalesfsp/etler/v3/internal/customapm"
+	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v3/internal/metrics"
+	"github.com/thalesfsp/etler/v3/internal/shared"
+	"github.com/thalesfsp/etler/v3/stage"
+	"github.com/thalesfsp/etler/v3/task"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 	"github.com/thalesfsp/sypl/level"
@@ -58,6 +58,10 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	Progress        *expvar.Int    `json:"progress"`
 	ProgressPercent *expvar.String `json:"progressPercent"`
 	Status          *expvar.String `json:"status"`
+
+	// pause is this pipeline's pause controller. Pausing one pipeline does
+	// not affect any other.
+	pause *shared.PauseController
 }
 
 //////
@@ -104,21 +108,22 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetStatus() *expvar.String {
 	return p.Status
 }
 
-// GetPaused returns the Paused status.
+// GetPaused returns the Paused status of THIS pipeline.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
-	if shared.GetPaused() == 1 {
+	if p.pause.Paused() {
 		return status.Paused
 	}
 
 	return status.Runnning
 }
 
-// SetPause sets the Paused status.
+// SetPause sets the Paused status of THIS pipeline. Its processors pause
+// before their next execution and resume immediately on unpause.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	if state {
 		p.GetStatus().Set(status.Paused.String())
 
-		shared.SetPaused(1)
+		p.pause.Pause()
 
 		return
 	}
@@ -126,8 +131,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	// Updates the pipeline's status.
 	p.GetStatus().Set(status.Runnning.String())
 
-	// Updates the shared status.
-	shared.SetPaused(0)
+	p.pause.Resume()
 }
 
 // GetOnFinished returns the `OnFinished` function.
@@ -168,12 +172,13 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetMetrics() map[string]string {
 	}
 }
 
-// UpdateObservability updates the observability of the stage.
+// UpdateObservability updates the observability of the pipeline. `tasksOut`
+// is the per-stage results — one task per stage, in stage order.
 func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 	ctx context.Context,
 	now time.Time,
 	originalTask task.Task[ProcessedData, ConvertedOut],
-	retroFeedIn task.Task[ProcessedData, ConvertedOut],
+	tasksOut []task.Task[ProcessedData, ConvertedOut],
 ) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -183,11 +188,11 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 
 	p.GetCounterDone().Add(1)
 
-	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, originalTask, retroFeedIn)
-	}
-
 	p.GetDuration().Set(time.Since(now).Milliseconds())
+
+	if p.GetOnFinished() != nil {
+		p.GetOnFinished()(ctx, p, originalTask, tasksOut)
+	}
 
 	p.GetLogger().PrintWithOptions(
 		level.Debug,
@@ -246,6 +251,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	)
 	defer span.End()
 
+	// Make this pipeline's pause controller visible to its processors.
+	tracedContext = shared.ContextWithPause(tracedContext, p.pause)
+
 	// Task initialization.
 	tsk, err := task.New[ProcessedData, ConvertedOut](processingData)
 	if err != nil {
@@ -257,7 +265,11 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		)
 	}
 
-	p.GetStatus().Set(status.Runnning.String())
+	// A paused pipeline keeps reporting paused — its processors are about to
+	// block on the pause controller.
+	if !p.pause.Paused() {
+		p.GetStatus().Set(status.Runnning.String())
+	}
 
 	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
@@ -323,16 +335,21 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
 
-		// NOTE: In concurrent mode stages don't retro-feed, so there is no
-		// single "final" task — OnFinished receives the original task as the
-		// retro-feed argument. The per-stage results are the returned slice.
-		p.UpdateObservability(ctx, now, originalTask, retroFeedIn)
+		// Recompute the final percentage once: the per-stage goroutines'
+		// read-format-set sequences can interleave and leave a stale value.
+		p.SetProgressPercent()
+
+		p.UpdateObservability(ctx, now, originalTask, stagesOut)
 
 		return stagesOut, nil
 	}
 
 	// Iterate through the stages, passing the output of each stage
-	// as the input of the next stage.
+	// as the input of the next stage. Each stage's full task (including its
+	// converted data) is collected and returned — one task per stage, in
+	// stage order. The final task is the last element.
+	tasksOut := make([]task.Task[ProcessedData, ConvertedOut], 0, len(p.Stages))
+
 	for _, s := range p.Stages {
 		rFI, err := s.Run(tracedContext, retroFeedIn)
 		if err != nil {
@@ -354,6 +371,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		// Update reference to be used as the input of the next stage.
 		retroFeedIn = rFI
 
+		tasksOut = append(tasksOut, rFI)
+
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
 		//////
@@ -372,9 +391,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	p.UpdateObservability(ctx, now, originalTask, retroFeedIn)
+	p.UpdateObservability(ctx, now, originalTask, tasksOut)
 
-	return []task.Task[ProcessedData, ConvertedOut]{retroFeedIn}, nil
+	return tasksOut, nil
 }
 
 //////
@@ -392,6 +411,7 @@ func New[ProcessedData, ConvertedOut any](
 		ConcurrentStage: concurrentStage,
 		Stages:          stages,
 		Logger:          logging.Get().New(name).SetTags(Type, name),
+		pause:           shared.NewPauseController(),
 
 		CreatedAt:   time.Now(),
 		Name:        name,

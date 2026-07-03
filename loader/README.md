@@ -36,7 +36,7 @@ Throughout the execution, the loader maintains comprehensive observability, incl
 
 3. **Observability**: The loader package provides comprehensive observability features, including metrics, logging, and tracing, to monitor and debug the loader's execution.
 
-4. **Metrics**: Loader metrics are exposed using the `expvar` package, allowing for easy integration with monitoring systems. Metrics include counters for created, running, failed, and done loaders, as well as duration and status.
+4. **Metrics**: Loader metrics are tracked with `expvar` variables (registered globally on `/debug/vars` only when `ETLER_METRICS_PUBLISH=true`; unpublished per-instance variables otherwise), allowing for easy integration with monitoring systems. Metrics include counters for created, running, failed, and done loaders, as well as duration and status.
 
 5. **Logging**: The package utilizes the `sypl` library for structured logging, providing rich context and consistent log levels throughout the codebase. Log messages include relevant information such as loader status, counters, duration, and more.
 

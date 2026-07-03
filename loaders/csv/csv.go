@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/thalesfsp/etler/v2/loader"
+	"github.com/thalesfsp/etler/v3/loader"
 	"github.com/thalesfsp/validation"
 )
 
