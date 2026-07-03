@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/thalesfsp/etler/v2/converter"
-	"github.com/thalesfsp/etler/v2/processor"
-	"github.com/thalesfsp/etler/v2/stage"
+	"github.com/thalesfsp/etler/v3/converter"
+	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v3/stage"
 	"github.com/thalesfsp/status"
 )
 
@@ -197,13 +197,20 @@ func TestPipeline_syncro(t *testing.T) {
 	assert.Equal(t, int64(1), p.GetCounterDone().Value())
 	assert.Equal(t, status.Done.String(), p.GetStatus().Value())
 
-	// Validates processed data.
-	assert.Len(t, outputTasks, 1)
+	// Validates processed data: one task per stage, final task last.
+	assert.Len(t, outputTasks, 2)
 
-	assert.Equal(t, "jack-double-square", outputTasks[0].ConvertedData[0].Name)
-	assert.Equal(t, "john-double-square", outputTasks[0].ConvertedData[1].Name)
-	assert.Equal(t, 2704, outputTasks[0].ConvertedData[0].Age)
-	assert.Equal(t, 4624, outputTasks[0].ConvertedData[1].Age)
+	final := outputTasks[len(outputTasks)-1]
+
+	assert.Equal(t, "jack-double-square", final.ConvertedData[0].Name)
+	assert.Equal(t, "john-double-square", final.ConvertedData[1].Name)
+	assert.Equal(t, 2704, final.ConvertedData[0].Age)
+	assert.Equal(t, 4624, final.ConvertedData[1].Age)
+
+	// The intermediate stage's task (including its converted data) is now
+	// exposed too, instead of being computed and discarded.
+	assert.Equal(t, "jack-double", outputTasks[0].ConvertedData[0].Name)
+	assert.Equal(t, "john-double", outputTasks[0].ConvertedData[1].Name)
 }
 
 func TestPipeline_concurrent(t *testing.T) {

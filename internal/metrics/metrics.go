@@ -3,8 +3,9 @@ package metrics
 import (
 	"expvar"
 	"fmt"
+	"os"
+	"sync"
 
-	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/status"
 )
 
@@ -14,15 +15,50 @@ const (
 
 	// Name of the package/application.
 	Name = "etler"
+
+	// PublishEnvVar, when set to "true", publishes metrics to the global
+	// expvar registry under their pattern name (visible on /debug/vars).
+	//
+	// Publishing is opt-in because the expvar registry can never be
+	// unregistered from: applications that create many short-lived
+	// pipelines would otherwise grow it without bound. When published,
+	// entities sharing the same type and name SHARE the same metric.
+	PublishEnvVar = "ETLER_METRICS_PUBLISH"
 )
 
-// NewString creates and initializes a new stribg metric.
+// registryMu guards the check-then-publish sequence against concurrent
+// constructors — expvar.Publish panics on duplicate names.
+var registryMu sync.Mutex
+
+// shouldPublish returns whether metrics must be published to the global
+// expvar registry. Read at call time so tests can toggle it.
+func shouldPublish() bool {
+	return os.Getenv(PublishEnvVar) == "true"
+}
+
+// NewString creates and initializes a new string metric. Unless publishing
+// is enabled (see PublishEnvVar), the metric is NOT registered globally.
 func NewString(name string) *expvar.String {
-	counter := expvar.NewString(name)
+	counter := stringVar(name)
 
 	counter.Set(status.Created.String())
 
 	return counter
+}
+
+func stringVar(name string) *expvar.String {
+	if !shouldPublish() {
+		return new(expvar.String)
+	}
+
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if v, ok := expvar.Get(name).(*expvar.String); ok {
+		return v
+	}
+
+	return expvar.NewString(name)
 }
 
 // NewStringWithPattern creates and initializes a new expvar.String with a
@@ -32,23 +68,38 @@ func NewString(name string) *expvar.String {
 func NewStringWithPattern(t, subject string, status status.Status) *expvar.String {
 	return NewString(
 		fmt.Sprintf(
-			"%s.%s.%s.%s.%s",
+			"%s.%s.%s.%s",
 			Name,
 			t,
 			subject,
 			status,
-			shared.GenerateUUID(),
 		),
 	)
 }
 
-// NewInt creates and initializes a new int metric.
+// NewInt creates and initializes a new int metric. Unless publishing is
+// enabled (see PublishEnvVar), the metric is NOT registered globally.
 func NewInt(name string) *expvar.Int {
-	counter := expvar.NewInt(name)
+	counter := intVar(name)
 
 	counter.Set(0)
 
 	return counter
+}
+
+func intVar(name string) *expvar.Int {
+	if !shouldPublish() {
+		return new(expvar.Int)
+	}
+
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if v, ok := expvar.Get(name).(*expvar.Int); ok {
+		return v
+	}
+
+	return expvar.NewInt(name)
 }
 
 // NewIntWithPattern creates and initializes a new expvar.Int with a consistent
@@ -58,13 +109,12 @@ func NewInt(name string) *expvar.Int {
 func NewIntWithPattern(t, subject string, status status.Status) *expvar.Int {
 	return NewInt(
 		fmt.Sprintf(
-			"%s.%s.%s.%s.%s.%s",
+			"%s.%s.%s.%s.%s",
 			Name,
 			t,
 			subject,
 			status,
 			DefaultMetricCounterLabel,
-			shared.GenerateUUID(),
 		),
 	)
 }

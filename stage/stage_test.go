@@ -10,10 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/dal/memory"
-	"github.com/thalesfsp/etler/v2/converters/passthru"
-	"github.com/thalesfsp/etler/v2/processor"
-	"github.com/thalesfsp/etler/v2/processors/storage"
-	"github.com/thalesfsp/etler/v2/task"
+	"github.com/thalesfsp/etler/v3/converters/passthru"
+	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v3/processors/storage"
+	"github.com/thalesfsp/etler/v3/task"
 	"github.com/thalesfsp/params/list"
 	"github.com/thalesfsp/status"
 )
@@ -39,7 +39,7 @@ func TestNew(t *testing.T) {
 			return out, nil
 		},
 		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[int], originalIn []int, processedOut []int) {
-			onFinishedTXTBuffer.WriteString(fmt.Sprintf("%s finished\n", p.GetName()))
+			fmt.Fprintf(&onFinishedTXTBuffer, "%s finished\n", p.GetName())
 		}),
 	)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestNew(t *testing.T) {
 			return out, nil
 		},
 		processor.WithOnFinished(func(ctx context.Context, p processor.IProcessor[int], originalIn []int, processedOut []int) {
-			onFinishedTXTBuffer.WriteString(fmt.Sprintf("%s finished\n", p.GetName()))
+			fmt.Fprintf(&onFinishedTXTBuffer, "%s finished\n", p.GetName())
 		}),
 	)
 	if err != nil {
@@ -183,7 +183,7 @@ func ExampleNew_storage_processor() {
 
 	// Iterate over tasksOut and write to the buffer.
 	for _, v := range tasksOut.ConvertedData {
-		buf.WriteString(fmt.Sprintf("%s %s\n", v.ID, v.Name))
+		fmt.Fprintf(&buf, "%s %s\n", v.ID, v.Name)
 	}
 
 	// Get a list from the memory storage.
@@ -196,7 +196,7 @@ func ExampleNew_storage_processor() {
 
 	// Iterate over fromMemory so we can add to the buffer.
 	for _, v := range fromMemory.Items {
-		buf.WriteString(fmt.Sprintf("%s %s\n", v.ID, v.Name))
+		fmt.Fprintf(&buf, "%s %s\n", v.ID, v.Name)
 	}
 
 	// Get the content of the buffer.
@@ -222,7 +222,7 @@ func ExampleNew_storage_processor() {
 // Create a test to test an async processor.
 func TestNew_async_processor(t *testing.T) {
 	// This will hold the result of the async processor.
-	ch := make(chan int)
+	ch := make(chan int, 1)
 
 	// Async processor.
 	asyncProcessor, err := processor.New(

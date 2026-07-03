@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/thalesfsp/customerror"
-	"github.com/thalesfsp/etler/v2/internal/customapm"
+	"github.com/thalesfsp/etler/v3/internal/customapm"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl"
 )
@@ -44,7 +44,7 @@ func Flatten2D[T any](data [][]T) []T {
 // NOTE: Only exported fields are considered.
 func ExtractID[T any](t T, idFieldName string) string {
 	v := reflect.ValueOf(t)
-	for v.Kind() == reflect.Ptr {
+	for v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 

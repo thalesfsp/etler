@@ -3,7 +3,7 @@ package stage
 import (
 	"context"
 
-	"github.com/thalesfsp/etler/v2/task"
+	"github.com/thalesfsp/etler/v3/task"
 )
 
 //////

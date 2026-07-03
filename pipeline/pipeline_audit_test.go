@@ -8,10 +8,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v2/converter"
-	"github.com/thalesfsp/etler/v2/internal/shared"
-	"github.com/thalesfsp/etler/v2/processor"
-	"github.com/thalesfsp/etler/v2/stage"
+	"github.com/thalesfsp/etler/v3/converter"
+	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v3/stage"
+	"github.com/thalesfsp/etler/v3/task"
 	"github.com/thalesfsp/status"
 )
 
@@ -302,6 +302,92 @@ func TestPipeline_twoPipelines_concurrentRuns(t *testing.T) {
 	require.NoError(t, <-errCh)
 	require.NoError(t, <-errCh)
 
-	// The global pause flag must be untouched by normal runs.
-	assert.Equal(t, int32(0), shared.GetPaused())
+	// Neither pipeline may end up paused by a normal run.
+	assert.Equal(t, status.Runnning, p1.GetPaused())
+	assert.Equal(t, status.Runnning, p2.GetPaused())
+}
+
+// v3: pausing one pipeline must NOT pause any other — pause is per pipeline,
+// no longer a process-wide global.
+func TestPipeline_pauseIsolation_betweenPipelines(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	paused, err := New("pause-isolated-a", "stays paused", false,
+		newIdentityStage(t, "stage-pause-isolated-a"),
+	)
+	require.NoError(t, err)
+
+	free, err := New("pause-isolated-b", "keeps running", false,
+		newIdentityStage(t, "stage-pause-isolated-b"),
+	)
+	require.NoError(t, err)
+
+	paused.SetPause(true)
+	defer paused.SetPause(false)
+
+	require.Equal(t, status.Paused, paused.GetPaused())
+	require.Equal(t, status.Runnning, free.GetPaused(),
+		"pausing pipeline A must not pause pipeline B")
+
+	// The unpaused pipeline must run to completion while the other one is
+	// paused.
+	out, err := free.Run(ctx, []int{1, 2, 3})
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, []int{1, 2, 3}, out[0].ConvertedData)
+}
+
+// v3: OnFinished receives the per-stage results — one task per stage, in
+// stage order, final task last.
+func TestPipeline_onFinished_receivesPerStageTasks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	double, err := processor.New(
+		"double-onfinished-pl-audit",
+		"doubles the input",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			out := make([]int, len(processingData))
+
+			for i, v := range processingData {
+				out[i] = v * 2
+			}
+
+			return out, nil
+		},
+	)
+	require.NoError(t, err)
+
+	identityConv := converter.MustDefault(
+		func(ctx context.Context, in int) (int, error) { return in, nil },
+	)
+
+	stg1, err := stage.New("stage-onfinished-pl-1", "double once", identityConv, double)
+	require.NoError(t, err)
+
+	stg2, err := stage.New("stage-onfinished-pl-2", "double twice", identityConv, double)
+	require.NoError(t, err)
+
+	p, err := New("onfinished-pl-audit", "per-stage results", false, stg1, stg2)
+	require.NoError(t, err)
+
+	var gotOriginal task.Task[int, int]
+
+	var gotTasks []task.Task[int, int]
+
+	p.SetOnFinished(func(ctx context.Context, pl IPipeline[int, int], original task.Task[int, int], tasksOut []task.Task[int, int]) {
+		gotOriginal = original
+		gotTasks = tasksOut
+	})
+
+	out, err := p.Run(ctx, []int{1})
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+
+	assert.Equal(t, []int{1}, gotOriginal.ProcessingData)
+	require.Len(t, gotTasks, 2, "OnFinished must receive one task per stage")
+	assert.Equal(t, []int{2}, gotTasks[0].ProcessingData)
+	assert.Equal(t, []int{4}, gotTasks[1].ProcessingData)
+	assert.Equal(t, []int{4}, gotTasks[len(gotTasks)-1].ConvertedData)
 }

@@ -1,6 +1,6 @@
-module github.com/thalesfsp/etler/v2
+module github.com/thalesfsp/etler/v3
 
-go 1.21
+go 1.22
 
 require (
 	github.com/gocarina/gocsv v0.0.0-20231116093920-b87c2d0e983a
