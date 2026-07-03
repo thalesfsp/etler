@@ -32,7 +32,7 @@ type Loader[In, Out any] struct {
 	Description string `json:"description"`
 
 	// Conversion function.
-	Func Load[In, Out] `json:"-"`
+	Func Load[In, Out] `json:"-" validate:"required"`
 
 	// Logger is the internal logger.
 	Logger sypl.ISypl `json:"-" validate:"required"`
@@ -241,14 +241,14 @@ func New[In, Out any](
 		Status:   metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
-	// Validation.
-	if err := validation.Validate(c); err != nil {
-		return nil, err
-	}
-
 	// Apply options.
 	for _, opt := range opts {
 		opt(c)
+	}
+
+	// Validation.
+	if err := validation.Validate(c); err != nil {
+		return nil, err
 	}
 
 	//////

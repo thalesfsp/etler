@@ -45,7 +45,7 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	OnFinished OnFinished[ProcessedData, ConvertedOut] `json:"-"`
 
 	// Stages to be used ProcessedData the pipeline.
-	Stages []stage.IStage[ProcessedData, ConvertedOut] `json:"stages"`
+	Stages []stage.IStage[ProcessedData, ConvertedOut] `json:"stages" validate:"required,gt=0"`
 
 	// Metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
@@ -113,12 +113,14 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	return status.Runnning
 }
 
-// Pause sets the Paused status.
+// SetPause sets the Paused status.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	if state {
 		p.GetStatus().Set(status.Paused.String())
 
 		shared.SetPaused(1)
+
+		return
 	}
 
 	// Updates the pipeline's status.
@@ -215,7 +217,14 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetProgressPercent() *expvar.Str
 // SetProgressPercent sets the `ProgressPercent` of the stage.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 	currentProgress := p.GetProgress().Value()
+
 	totalProgress := len(p.Stages)
+	if totalProgress == 0 {
+		p.GetProgressPercent().Set("0%")
+
+		return
+	}
+
 	percentage := float64(currentProgress) / float64(totalProgress) * 100
 
 	p.GetProgressPercent().Set(fmt.Sprintf("%d%%", int(percentage)))
@@ -252,6 +261,11 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 
 	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
+	// Progress is relative to the current run.
+	p.GetProgress().Set(0)
+
+	p.SetProgressPercent()
+
 	now := time.Now()
 
 	//////
@@ -268,19 +282,10 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		stagesOut, errs := concurrentloop.Map(tracedContext, p.Stages, func(ctx context.Context, s stage.IStage[ProcessedData, ConvertedOut]) (task.Task[ProcessedData, ConvertedOut], error) {
 			stageOut, err := s.Run(tracedContext, originalTask)
 			if err != nil {
-				//////
-				// Observability: tracing, metrics, status, logging, etc.
-				//////
-
-				return task.Task[ProcessedData, ConvertedOut]{}, shared.OnErrorHandler(
-					tracedContext,
-					p,
-					p.GetLogger(),
-					err,
-					"run stage",
-					Type,
-					p.GetName(),
-				)
+				// The stage already traced, logged, and counted its own
+				// failure. The pipeline-level handling happens once, below,
+				// so the failure isn't double counted.
+				return task.Task[ProcessedData, ConvertedOut]{}, err
 			}
 
 			//////
@@ -297,14 +302,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 			p.SetProgressPercent()
 
 			return stageOut, nil
-		})
+		}, concurrentloop.WithRemoveZeroValues(false))
 		if errs != nil {
-			//////
-			// Observability: tracing, metrics, status, logging, etc.
-			//////
-
-			p.GetStatus().Set(status.Failed.String())
-
 			//////
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
@@ -313,8 +312,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 				tracedContext,
 				p,
 				p.GetLogger(),
-				err,
-				"convert",
+				errs,
+				"run stage",
 				Type,
 				p.GetName(),
 			)

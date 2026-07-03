@@ -113,7 +113,14 @@ func (s *Stage[ProcessingData, ConvertedData]) GetProgressPercent() *expvar.Stri
 // SetProgressPercent sets the `ProgressPercent` of the stage.
 func (s *Stage[ProcessingData, ConvertedData]) SetProgressPercent() {
 	currentProgress := s.GetProgress().Value()
+
 	totalProgress := len(s.Processors)
+	if totalProgress == 0 {
+		s.GetProgressPercent().Set("0%")
+
+		return
+	}
+
 	percentage := float64(currentProgress) / float64(totalProgress) * 100
 
 	s.GetProgressPercent().Set(fmt.Sprintf("%d%%", int(percentage)))
@@ -185,6 +192,11 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	s.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 
+	// Progress is relative to the current run.
+	s.GetProgress().Set(0)
+
+	s.SetProgressPercent()
+
 	now := time.Now()
 
 	//////
@@ -199,11 +211,21 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	// NOTE: It process the data sequentially.
 	for _, proc := range s.Processors {
+		// Pin the loop variable and snapshot the data. Without this, the
+		// async goroutine below races with the loop: it may observe a later
+		// processor (Go <1.22 loop-variable semantics) and a `retroFeedIn`
+		// concurrently reassigned by subsequent sync processors.
+		proc := proc
+
 		if proc.GetAsync() {
+			asyncIn := retroFeedIn
+
 			go func() {
-				// Re-use the output of the previous stage as the input of the
-				// next stage ensuring that the data is processed sequentially.
-				if _, err := proc.Run(tracedContext, retroFeedIn); err != nil {
+				// Runs with the data snapshot taken at this processor's
+				// position in the chain.
+				//
+				// WARN: The output of the processing is not forwarded.
+				if _, err := proc.Run(tracedContext, asyncIn); err != nil {
 					//////
 					// Observability: tracing, metrics, status, logging, etc.
 					//////
@@ -221,6 +243,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 				//////
 
 				s.GetStatus().Set(status.Failed.String())
+
+				s.GetCounterFailed().Add(1)
 
 				// Returns whatever is tsk `out` and the error.
 				//
@@ -249,7 +273,15 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Stage's conversor.
 	//////
 
-	convertedData, errs := concurrentloop.Map(tracedContext, retroFeedIn, s.Conversor.Run)
+	// NOTE: WithRemoveZeroValues(false) is required. The default would
+	// silently drop converted items that happen to be the zero value of
+	// `ConvertedData` — data loss.
+	convertedData, errs := concurrentloop.Map(
+		tracedContext,
+		retroFeedIn,
+		s.Conversor.Run,
+		concurrentloop.WithRemoveZeroValues(false),
+	)
 	if errs != nil {
 		//////
 		// Observability: tracing, metrics, status, logging, etc.
@@ -278,8 +310,6 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	s.GetStatus().Set(status.Done.String())
 
 	s.GetCounterDone().Add(1)
-
-	s.GetDuration().Set(time.Since(s.GetCreatedAt()).Milliseconds())
 
 	//////
 	// Updates task's data.

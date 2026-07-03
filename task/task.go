@@ -16,7 +16,7 @@ import (
 // Type of the entity.
 const (
 	Name = "task"
-	Type = "stage"
+	Type = "task"
 )
 
 // Task encapsulates the work to be done plus some metadata.

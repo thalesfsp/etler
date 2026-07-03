@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"expvar"
 
 	"github.com/thalesfsp/etler/v2/internal/shared"
 	"github.com/thalesfsp/etler/v2/task"
@@ -13,6 +14,15 @@ type IPipeline[ProcessedData, ConvertedOut any] interface {
 	shared.IMeta
 
 	shared.IMetrics
+
+	// GetProgress returns the `Progress` of the pipeline.
+	GetProgress() *expvar.Int
+
+	// GetProgressPercent returns the `ProgressPercent` of the pipeline.
+	GetProgressPercent() *expvar.String
+
+	// SetProgressPercent sets the `ProgressPercent` of the pipeline.
+	SetProgressPercent()
 
 	// GetPaused returns the Paused status.
 	GetPaused() status.Status
