@@ -7,9 +7,9 @@ import (
 
 	"github.com/thalesfsp/etler/v3/internal/logging"
 	"github.com/thalesfsp/status"
-	"github.com/thalesfsp/sypl"
-	"github.com/thalesfsp/sypl/fields"
-	"github.com/thalesfsp/sypl/level"
+	"github.com/thalesfsp/sypl/v2"
+	"github.com/thalesfsp/sypl/v2/fields"
+	"github.com/thalesfsp/sypl/v2/level"
 	"go.elastic.co/apm"
 )
 

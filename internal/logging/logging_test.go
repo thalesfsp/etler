@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/sypl/fields"
+	"github.com/thalesfsp/sypl/v2/fields"
 	"go.elastic.co/apm"
 )
 

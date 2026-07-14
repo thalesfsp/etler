@@ -13,7 +13,7 @@ import (
 	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v3/internal/customapm"
 	"github.com/thalesfsp/status"
-	"github.com/thalesfsp/sypl"
+	"github.com/thalesfsp/sypl/v2"
 )
 
 // GenerateIDBasedOnContent generates a SHA-1 hash (content-based) for message

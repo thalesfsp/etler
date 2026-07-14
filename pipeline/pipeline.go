@@ -14,8 +14,8 @@ import (
 	"github.com/thalesfsp/etler/v3/stage"
 	"github.com/thalesfsp/etler/v3/task"
 	"github.com/thalesfsp/status"
-	"github.com/thalesfsp/sypl"
-	"github.com/thalesfsp/sypl/level"
+	"github.com/thalesfsp/sypl/v2"
+	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/validation"
 )
 

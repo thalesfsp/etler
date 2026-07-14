@@ -11,7 +11,7 @@ require (
 	github.com/thalesfsp/dal/v2 v2.1.2
 	github.com/thalesfsp/params/v2 v2.0.0
 	github.com/thalesfsp/status v1.0.19
-	github.com/thalesfsp/sypl v1.19.20
+	github.com/thalesfsp/sypl/v2 v2.0.0
 	github.com/thalesfsp/validation v0.0.3
 	go.elastic.co/apm v1.15.0
 )
@@ -46,6 +46,7 @@ require (
 	github.com/thalesfsp/configurer v1.3.29 // indirect
 	github.com/thalesfsp/customerror v1.2.9 // indirect
 	github.com/thalesfsp/randomness v0.0.9 // indirect
+	github.com/thalesfsp/sypl v1.19.20 // indirect
 	go.elastic.co/fastjson v1.5.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.36.0 // indirect

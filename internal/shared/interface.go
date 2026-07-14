@@ -4,7 +4,7 @@ import (
 	"expvar"
 	"time"
 
-	"github.com/thalesfsp/sypl"
+	"github.com/thalesfsp/sypl/v2"
 )
 
 // IMeta defines what an `Entity` must do.
