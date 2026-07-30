@@ -35,7 +35,7 @@ type Processor[ProcessingData any] struct {
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
 	// Name of the processor.
-	Name string `json:"name"`
+	Name string `json:"name" validate:"required"`
 
 	// Description of the processor.
 	Description string `json:"description"`

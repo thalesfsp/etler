@@ -9,7 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thalesfsp/dal/v2/storage"
+	"github.com/thalesfsp/etler/v3/processor"
 	"github.com/thalesfsp/params/v2/create"
+	"github.com/thalesfsp/sypl/v2"
+	"github.com/thalesfsp/sypl/v2/level"
 )
 
 type v3Item struct {
@@ -26,7 +29,22 @@ type stubStorage struct {
 	failWith error
 }
 
+type v3InvalidatingLogger struct {
+	sypl.ISypl
+	invalidate func()
+}
+
+func (l *v3InvalidatingLogger) PrintlnWithOptions(level.Level, string, ...sypl.OptionFunc) sypl.ISypl {
+	l.invalidate()
+
+	return l
+}
+
 func (s *stubStorage) Create(ctx context.Context, id, target string, v any, prm *create.Create, options ...storage.Func[*create.Create]) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	if s.failWith != nil {
 		return "", s.failWith
 	}
@@ -67,4 +85,118 @@ func TestStorage_run_createFails(t *testing.T) {
 	assert.Nil(t, out)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "boom-processor-create")
+}
+
+// Edge case: no input means no storage calls and an unchanged empty slice.
+func TestStorage_run_emptyInput(t *testing.T) {
+	stub := &stubStorage{}
+
+	s, err := New[v3Item](stub, 1, "v3-empty-")
+	require.NoError(t, err)
+
+	in := []v3Item{}
+
+	out, err := s.Run(context.Background(), in)
+	require.NoError(t, err)
+	assert.NotNil(t, out)
+	assert.Empty(t, out)
+	assert.Equal(t, int64(0), stub.created.Load())
+}
+
+// Bad path: cancellation is observed by the concurrent storage operation.
+func TestStorage_run_cancelledContext(t *testing.T) {
+	stub := &stubStorage{}
+
+	s, err := New[v3Item](stub, 1, "v3-cancelled-")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	out, err := s.Run(ctx, []v3Item{{Name: "never-created"}})
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), context.Canceled.Error())
+	assert.Equal(t, int64(0), stub.created.Load())
+}
+
+// Construction errors are returned by New rather than escaping as panics.
+func TestNew_validationFailures_returnErrorNotPanic(t *testing.T) {
+	tests := []struct {
+		name string
+		opt  processor.Func[v3Item]
+	}{
+		{
+			name: "missing required logger",
+			opt: func(p processor.IProcessor[v3Item]) processor.IProcessor[v3Item] {
+				p.(*processor.Processor[v3Item]).Logger = nil
+
+				return p
+			},
+		},
+		{
+			name: "nil function",
+			opt: func(p processor.IProcessor[v3Item]) processor.IProcessor[v3Item] {
+				p.(*processor.Processor[v3Item]).Func = nil
+
+				return p
+			},
+		},
+		{
+			name: "empty name",
+			opt: func(p processor.IProcessor[v3Item]) processor.IProcessor[v3Item] {
+				p.(*processor.Processor[v3Item]).Name = ""
+
+				return p
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				got *Storage[v3Item]
+				err error
+			)
+
+			require.NotPanics(t, func() {
+				got, err = New[v3Item](&stubStorage{}, 1, "v3-invalid-", tt.opt)
+			})
+
+			assert.Nil(t, got)
+			assert.Error(t, err)
+		})
+	}
+}
+
+// Must is intentionally the panicking constructor variant.
+func TestMust_validationFailure_panics(t *testing.T) {
+	nilFunc := func(p processor.IProcessor[v3Item]) processor.IProcessor[v3Item] {
+		p.(*processor.Processor[v3Item]).Func = nil
+
+		return p
+	}
+
+	assert.Panics(t, func() {
+		Must[v3Item](&stubStorage{}, 1, "v3-invalid-", nilFunc)
+	})
+}
+
+// The wrapper's validation catches state invalidated after inner validation.
+func TestNew_outerValidationFailure_returnsError(t *testing.T) {
+	invalidateAfterInnerValidation := func(p processor.IProcessor[v3Item]) processor.IProcessor[v3Item] {
+		concrete := p.(*processor.Processor[v3Item])
+		concrete.Logger = &v3InvalidatingLogger{
+			ISypl: concrete.Logger,
+			invalidate: func() {
+				concrete.Func = nil
+			},
+		}
+
+		return p
+	}
+
+	got, err := New[v3Item](&stubStorage{}, 1, "v3-invalid-", invalidateAfterInnerValidation)
+	assert.Nil(t, got)
+	assert.Error(t, err)
 }
