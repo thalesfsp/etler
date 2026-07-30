@@ -2,7 +2,10 @@ package shared
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGenerateIDBasedOnContent(t *testing.T) {
@@ -19,7 +22,7 @@ func TestGenerateIDBasedOnContent(t *testing.T) {
 			args: args{
 				ct: "test",
 			},
-			want: "a94a8fe5ccb19ba61c4c0873d391e987982fbbd3",
+			want: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
 		},
 	}
 	for _, tt := range tests {
@@ -27,6 +30,10 @@ func TestGenerateIDBasedOnContent(t *testing.T) {
 			if got := GenerateIDBasedOnContent(tt.args.ct); got != tt.want {
 				t.Errorf("GenerateIDBasedOnContent() = %v, want %v", got, tt.want)
 			}
+
+			got := GenerateIDBasedOnContent(tt.args.ct)
+			assert.Len(t, got, 64)
+			assert.True(t, strings.HasPrefix(got, "9f86d081884c7d65"))
 		})
 	}
 }

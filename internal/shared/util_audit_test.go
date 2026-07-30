@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,6 +54,76 @@ func TestExtractID_customFieldName(t *testing.T) {
 	}
 
 	assert.Equal(t, "c1", ExtractID(withCode{Code: "c1", ID: "i1"}, "Code"))
+}
+
+// Regression: a configured field must win even when a conventional ID field
+// appears first in the struct.
+func TestExtractID_configuredFieldPrecedesEarlierDefaultID(t *testing.T) {
+	type withExternalID struct {
+		ID         string
+		ExternalID string
+	}
+
+	assert.Equal(
+		t,
+		"right",
+		ExtractID(withExternalID{ID: "wrong", ExternalID: "right"}, "ExternalID"),
+	)
+}
+
+func TestExtractID_pointerValuesAreDereferenced(t *testing.T) {
+	type withID struct {
+		ID *string
+	}
+
+	firstValue := "stable"
+	secondValue := "stable"
+
+	firstID := ExtractID(withID{ID: &firstValue}, "")
+	secondID := ExtractID(withID{ID: &secondValue}, "")
+
+	assert.Equal(t, "stable", firstID)
+	assert.Equal(t, firstID, secondID)
+}
+
+func TestExtractID_nilAndWhitespaceValuesAreAbsent(t *testing.T) {
+	type withID struct {
+		ID *string
+	}
+
+	var nilID *string
+	whitespaceID := " \t\n"
+
+	assert.Empty(t, ExtractID(withID{ID: nilID}, ""))
+	assert.Empty(t, ExtractID(withID{ID: &whitespaceID}, ""))
+}
+
+type auditStringerID int
+
+func (id auditStringerID) String() string {
+	return fmt.Sprintf("stringer-%d", id)
+}
+
+func TestExtractID_supportedAndUnsupportedKinds(t *testing.T) {
+	t.Run("signed integer", func(t *testing.T) {
+		assert.Equal(t, "-42", ExtractID(struct{ ID int64 }{ID: -42}, ""))
+	})
+
+	t.Run("unsigned integer", func(t *testing.T) {
+		assert.Equal(t, "42", ExtractID(struct{ ID uint64 }{ID: 42}, ""))
+	})
+
+	t.Run("fmt.Stringer", func(t *testing.T) {
+		assert.Equal(t, "stringer-42", ExtractID(struct{ ID auditStringerID }{ID: 42}, ""))
+	})
+
+	t.Run("unsupported kind", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID []string }{ID: []string{"not", "an", "id"}}, ""))
+	})
+
+	t.Run("uintptr is unsupported", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID uintptr }{ID: 42}, ""))
+	})
 }
 
 // Happy path: ID found on an embedded (anonymous) EXPORTED struct.

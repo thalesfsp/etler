@@ -55,8 +55,8 @@ func TestNew_idOptionsDoNotPanic(t *testing.T) {
 			stub,
 			1,
 			"prefix-",
-			WithIDFunc(func(item v4WithID) string {
-				return "custom-" + item.Name
+			WithIDFunc(func(_ context.Context, item v4WithID) (string, error) {
+				return "custom-" + item.Name, nil
 			}),
 			WithIDFieldName[v4WithID]("Name"),
 			WithProcessorOptions[v4WithID](),
@@ -119,7 +119,7 @@ func TestStorage_idResolutionIgnoresUnrelatedContextValues(t *testing.T) {
 	assert.Equal(t, []string{"prefix-key-7", "prefix-key-7"}, stub.createdIDs())
 }
 
-func TestStorage_nilCustomIDFuncFailsWithoutWriting(t *testing.T) {
+func TestNew_nilCustomIDFuncReturnsRequiredArgumentError(t *testing.T) {
 	stub := &stubStorage{}
 	processor, err := New[v4NoID](
 		stub,
@@ -127,14 +127,53 @@ func TestStorage_nilCustomIDFuncFailsWithoutWriting(t *testing.T) {
 		"prefix-",
 		WithIDFunc[v4NoID](nil),
 	)
-	require.NoError(t, err)
 
-	out, err := processor.Run(context.Background(), []v4NoID{{Name: "alice"}})
-
-	assert.Nil(t, out)
+	assert.Nil(t, processor)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom id function is nil")
 	assert.Empty(t, stub.createdIDs())
+}
+
+func TestStorage_customIDFuncErrorPropagatesWithoutWriting(t *testing.T) {
+	stub := &stubStorage{}
+	derivationErr := errors.New("id derivation failed")
+	contextValue := make(chan any, 1)
+	ctx := context.WithValue(context.Background(), v4UnrelatedContextKey{}, "run-context")
+	processor, err := New[v4NoID](
+		stub,
+		1,
+		"prefix-",
+		WithIDFunc(func(gotCtx context.Context, _ v4NoID) (string, error) {
+			contextValue <- gotCtx.Value(v4UnrelatedContextKey{})
+
+			return "", derivationErr
+		}),
+	)
+	require.NoError(t, err)
+
+	out, err := processor.Run(ctx, []v4NoID{{Name: "alice"}})
+
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), derivationErr.Error())
+	assert.Equal(t, "run-context", <-contextValue)
+	assert.Empty(t, stub.createdIDs())
+}
+
+func TestStorage_customTargetReachesCreate(t *testing.T) {
+	stub := &stubStorage{}
+	processor, err := New[v4NoID](
+		stub,
+		1,
+		"prefix-",
+		WithTarget[v4NoID]("archive"),
+	)
+	require.NoError(t, err)
+
+	_, err = processor.Run(context.Background(), []v4NoID{{Name: "alice"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"archive"}, stub.createdTargets())
 }
 
 func TestStorage_usesExtractedOrContentDerivedID(t *testing.T) {
@@ -151,7 +190,7 @@ func TestStorage_usesExtractedOrContentDerivedID(t *testing.T) {
 		{
 			name:   "empty ID field falls back to content",
 			item:   v4WithID{Name: "alice"},
-			wantID: "prefix-af6262fcafdb97d0c107fa2b27bd8cdd4f580112",
+			wantID: "prefix-4f5c7a3b9e3939f0fe9eea2f3c7e9c15ddfe132c19dbf58a01295eaed6092ba3",
 		},
 	}
 
@@ -176,7 +215,7 @@ func TestStorage_usesExtractedOrContentDerivedID(t *testing.T) {
 		_, err = processor.Run(context.Background(), []v4NoID{{Name: "alice"}})
 		require.NoError(t, err)
 
-		assert.Equal(t, []string{"prefix-66a565090e9edbbc042898120bcd60d719734ac3"}, stub.createdIDs())
+		assert.Equal(t, []string{"prefix-3b8f02c64624e355de637e609642b441ab1427b619d9fb91cb6c7b0e8f8ceed1"}, stub.createdIDs())
 	})
 }
 
@@ -223,8 +262,8 @@ func TestStorage_idOptions(t *testing.T) {
 			stub,
 			1,
 			"prefix-",
-			WithIDFunc(func(item v4WithID) string {
-				return "custom-" + item.Name
+			WithIDFunc(func(_ context.Context, item v4WithID) (string, error) {
+				return "custom-" + item.Name, nil
 			}),
 			WithIDFieldName[v4WithID]("Name"),
 		)
@@ -259,7 +298,7 @@ func TestStorage_emptyCustomIDFailsWithoutWriting(t *testing.T) {
 		stub,
 		1,
 		"prefix-",
-		WithIDFunc(func(v4NoID) string { return "" }),
+		WithIDFunc(func(context.Context, v4NoID) (string, error) { return "", nil }),
 	)
 	require.NoError(t, err)
 
@@ -284,7 +323,7 @@ func TestStorage_createErrorIsPropagatedAndRecorded(t *testing.T) {
 	assert.Nil(t, out)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write committed but response lost")
-	assert.Equal(t, []string{"prefix-66a565090e9edbbc042898120bcd60d719734ac3"}, stub.createdIDs())
+	assert.Equal(t, []string{"prefix-3b8f02c64624e355de637e609642b441ab1427b619d9fb91cb6c7b0e8f8ceed1"}, stub.createdIDs())
 	assert.Equal(t, "1", processor.GetCounterFailed().String())
 	assert.Equal(t, status.Failed.String(), processor.GetStatus().Value())
 }
