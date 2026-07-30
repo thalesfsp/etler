@@ -142,7 +142,7 @@ func TestE2E_converterChangesType(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 
-	var converted []int = out[0].ConvertedData
+	converted := out[0].ConvertedData
 	assert.Equal(t, []int{7, 0, -3}, converted)
 	assert.Equal(t, []string{"7", "0", "-3"}, out[0].ProcessingData)
 }
