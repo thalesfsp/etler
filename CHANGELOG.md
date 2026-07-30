@@ -57,9 +57,9 @@ Measured (median of three runs):
 | --- | --- | --- | --- |
 | Pipeline, 2 stages × 1k items | 19.0 → 7.1 ms (−63%) | 31.5 → 6.6 MB (−79%) | 542k → 112k (−79%) |
 | Stage, 1k items | 9.9 → 3.9 ms (−60%) | 15.7 → 3.2 MB (−79%) | 271k → 56k (−79%) |
-| Stage, single item | 145 → 16.5 µs (−89%) | 69 → 8.4 KB (−88%) | 762 → 97 (−87%) |
-| Processor, 1k items | 71.6 → 4.2 µs (−94%) | 45 → 10.9 KB (−76%) | 236 → 13 (−94%) |
-| Converter, single call | 58.5 → 2.9 µs (−95%) | 36.7 → 2.2 KB (−94%) | 235 → 11 (−95%) |
+| Stage, single item | 145 → 17.2 µs (−88%) | 69.5 → 8.4 KB (−88%) | 762 → 93 (−88%) |
+| Processor, 1k items | 71.6 → 3.9 µs (−95%) | 45 → 11.5 KB (−74%) | 236 → 13 (−94%) |
+| Converter, single call | 58.5 → 3.3 µs (−94%) | 36.7 → 3.3 KB (−91%) | 235 → 12 (−95%) |
 | CSV loader, 1k rows | 1.09 → 0.28 ms (−75%) | 821 → 239 KB (−71%) | 18.9k → 7.0k (−63%) |
 
 Recycling the pooled transaction (the trace fix below) is what took the
@@ -112,11 +112,18 @@ must not mutate their input slice or the values it points to, and a single
 pipeline or stage instance must not be `Run` concurrently with itself.
 
 ### Added
+- **13 runnable examples** across the public API, verified by `go test` so they
+  cannot silently rot — including an end-to-end one at the package root. Browse
+  them on [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
+  `go test -run Example ./...`.
 - A benchmark suite isolating per-item cost from fixed per-call cost.
 - Ten end-to-end scenarios, including a regression guard for the zero-value
   data-loss bug, async failure, pause/resume, and context cancellation.
-- Total coverage 96.8% → 99.4%; `processors/storage`, `converters/storage`,
-  `converters/csv` and `converters/passthru` are at 100%, `loaders/csv` at 96.9%.
+- README installation, quick start, concurrency contract, and a v3 upgrade guide.
+- Total coverage 96.8% → 99.0%; `processors/storage`, `converters/storage`,
+  `converters/csv` and `converters/passthru` are at 100%, `loaders/csv` at 96.0%.
+- The suite is hermetic against `SYPL_LEVEL` and `SYPL_FILTER`: it passes whether
+  or not either is exported.
 
 ## [3.0.0] - 2026-07-03
 
