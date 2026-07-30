@@ -2,7 +2,9 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"expvar"
+	"reflect"
 	"sync"
 	"time"
 
@@ -324,7 +326,7 @@ func New[ProcessingData any](
 		return nil, err
 	}
 
-	p := &Processor[ProcessingData]{
+	var p IProcessor[ProcessingData] = &Processor[ProcessingData]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 
@@ -344,7 +346,10 @@ func New[ProcessingData any](
 
 	// Apply options.
 	for _, opt := range opts {
-		opt(p)
+		p = opt(p)
+		if isNilOptionResult(p) {
+			return nil, errors.New("processor option returned nil")
+		}
 	}
 
 	// Validation.
@@ -363,4 +368,20 @@ func New[ProcessingData any](
 	p.GetLogger().PrintlnWithOptions(level.Trace, status.Created.String())
 
 	return p, nil
+}
+
+// isNilOptionResult detects nil interfaces and interfaces holding nil values.
+func isNilOptionResult[ProcessingData any](p IProcessor[ProcessingData]) bool {
+	if p == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(p)
+
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

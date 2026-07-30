@@ -2,7 +2,9 @@ package loader
 
 import (
 	"context"
+	"errors"
 	"expvar"
+	"reflect"
 	"sync"
 	"time"
 
@@ -243,7 +245,7 @@ func New[In, Out any](
 		return nil, err
 	}
 
-	c := &Loader[In, Out]{
+	var c ILoader[In, Out] = &Loader[In, Out]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 
@@ -262,7 +264,10 @@ func New[In, Out any](
 
 	// Apply options.
 	for _, opt := range opts {
-		opt(c)
+		c = opt(c)
+		if isNilOptionResult(c) {
+			return nil, errors.New("loader option returned nil")
+		}
 	}
 
 	// Validation.
@@ -281,4 +286,20 @@ func New[In, Out any](
 	c.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
 
 	return c, nil
+}
+
+// isNilOptionResult detects nil interfaces and interfaces holding nil values.
+func isNilOptionResult[In, Out any](c ILoader[In, Out]) bool {
+	if c == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(c)
+
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

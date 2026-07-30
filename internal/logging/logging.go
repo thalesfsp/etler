@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"os"
+	"reflect"
 	"sync"
 
 	"github.com/thalesfsp/sypl/v2"
@@ -50,7 +51,7 @@ type Logger struct {
 // processors; treating every processor as force-capable would disable this gate
 // because etler attaches ChangeFirstCharCase to every output.
 func Admits(l sypl.ISypl, lvl level.Level) bool {
-	if l == nil || lvl == level.None {
+	if isNilLogger(l) || lvl == level.None {
 		return false
 	}
 
@@ -71,6 +72,22 @@ func Admits(l sypl.ISypl, lvl level.Level) bool {
 	}
 
 	return false
+}
+
+// isNilLogger detects both nil interfaces and interfaces holding nil values.
+func isNilLogger(l sypl.ISypl) bool {
+	if l == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(l)
+
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // Get returns a setup logger, or set it up. Default level is `ERROR`.

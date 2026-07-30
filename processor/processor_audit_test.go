@@ -12,6 +12,10 @@ import (
 	"github.com/thalesfsp/status"
 )
 
+type replacementProcessor struct {
+	IProcessor[int]
+}
+
 // Bug: OnFinished must receive the processor's OUTPUT, not the input echoed
 // back.
 func TestProcessor_onFinished_receivesOutput(t *testing.T) {
@@ -53,6 +57,43 @@ func TestProcessor_new_nilFunc_returnsError(t *testing.T) {
 	p, err := New[int]("nil-func-audit", "no function", nil)
 	assert.Nil(t, p)
 	assert.Error(t, err, "a processor without a transform function must not be created")
+}
+
+// A return-valued option may replace or wrap the processor.
+func TestProcessor_new_usesOptionReturnValue(t *testing.T) {
+	var replacement *replacementProcessor
+
+	got, err := New(
+		"replacement-option-processor",
+		"uses the option return value",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+		func(p IProcessor[int]) IProcessor[int] {
+			replacement = &replacementProcessor{IProcessor: p}
+
+			return replacement
+		},
+	)
+	require.NoError(t, err)
+	assert.Same(t, replacement, got)
+}
+
+// Returning nil from an option is an invalid constructor result.
+func TestProcessor_new_rejectsNilOptionReturn(t *testing.T) {
+	got, err := New(
+		"nil-option-processor",
+		"rejects a nil option return",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+		func(IProcessor[int]) IProcessor[int] {
+			return nil
+		},
+	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
 }
 
 // Bad path: a failing transform must propagate the cause and update metrics.

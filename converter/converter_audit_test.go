@@ -11,6 +11,10 @@ import (
 	"github.com/thalesfsp/status"
 )
 
+type replacementConverter struct {
+	IConverter[int, int]
+}
+
 // Edge case: a converter without a conversion function is a configuration
 // error — it would panic at Run time otherwise.
 func TestConverter_new_nilFunc_returnsError(t *testing.T) {
@@ -33,6 +37,43 @@ func TestConverter_mustDefault_nilFunc_panics(t *testing.T) {
 	assert.Panics(t, func() {
 		MustDefault[int, int](nil)
 	})
+}
+
+// A return-valued option may replace or wrap the converter.
+func TestConverter_new_usesOptionReturnValue(t *testing.T) {
+	var replacement *replacementConverter
+
+	got, err := New(
+		"replacement-option-converter",
+		"uses the option return value",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		func(c IConverter[int, int]) IConverter[int, int] {
+			replacement = &replacementConverter{IConverter: c}
+
+			return replacement
+		},
+	)
+	require.NoError(t, err)
+	assert.Same(t, replacement, got)
+}
+
+// Returning nil from an option is an invalid constructor result.
+func TestConverter_new_rejectsNilOptionReturn(t *testing.T) {
+	got, err := New(
+		"nil-option-converter",
+		"rejects a nil option return",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		func(IConverter[int, int]) IConverter[int, int] {
+			return nil
+		},
+	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
 }
 
 // Bad path: a failing conversion must propagate the cause and update metrics.

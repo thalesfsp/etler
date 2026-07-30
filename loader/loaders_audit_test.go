@@ -11,12 +11,53 @@ import (
 	"github.com/thalesfsp/status"
 )
 
+type replacementLoader struct {
+	ILoader[string, []int]
+}
+
 // Edge case: a loader without a load function is a configuration error — it
 // would panic at Run time otherwise.
 func TestLoader_new_nilFunc_returnsError(t *testing.T) {
 	l, err := New[string, []int]("nil-func-audit", "no function", nil)
 	assert.Nil(t, l)
 	assert.Error(t, err, "a loader without a load function must not be created")
+}
+
+// A return-valued option may replace or wrap the loader.
+func TestLoader_new_usesOptionReturnValue(t *testing.T) {
+	var replacement *replacementLoader
+
+	got, err := New(
+		"replacement-option-loader",
+		"uses the option return value",
+		func(ctx context.Context, in string) ([]int, error) {
+			return []int{len(in)}, nil
+		},
+		func(l ILoader[string, []int]) ILoader[string, []int] {
+			replacement = &replacementLoader{ILoader: l}
+
+			return replacement
+		},
+	)
+	require.NoError(t, err)
+	assert.Same(t, replacement, got)
+}
+
+// Returning nil from an option is an invalid constructor result.
+func TestLoader_new_rejectsNilOptionReturn(t *testing.T) {
+	got, err := New(
+		"nil-option-loader",
+		"rejects a nil option return",
+		func(ctx context.Context, in string) ([]int, error) {
+			return []int{len(in)}, nil
+		},
+		func(ILoader[string, []int]) ILoader[string, []int] {
+			return nil
+		},
+	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
 }
 
 // Bad path: a failing load must propagate the cause and update metrics.

@@ -179,6 +179,100 @@ func TestPipeline_SetPause_resumeRestoresTerminalStatus(t *testing.T) {
 	})
 }
 
+// Regression: pausing an already-paused pipeline is a no-op, so a run that
+// finishes while paused keeps its terminal status after the eventual resume.
+func TestPipeline_SetPause_repeatedPausePreservesTerminalStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		runErr     error
+		wantStatus status.Status
+	}{
+		{
+			name:       "done",
+			wantStatus: status.Done,
+		},
+		{
+			name:       "failed",
+			runErr:     errors.New("repeated-pause-failed"),
+			wantStatus: status.Failed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entered := make(chan struct{})
+			release := make(chan struct{})
+
+			proc, err := processor.New(
+				"repeated-pause-"+tt.name+"-processor",
+				"finishes after the pipeline is paused",
+				func(ctx context.Context, processingData []int) ([]int, error) {
+					close(entered)
+					<-release
+
+					return processingData, tt.runErr
+				},
+			)
+			require.NoError(t, err)
+
+			conv, err := converter.New(
+				"repeated-pause-"+tt.name+"-converter",
+				"identity converter",
+				func(ctx context.Context, in int) (int, error) {
+					return in, nil
+				},
+			)
+			require.NoError(t, err)
+
+			stg, err := stage.New(
+				"repeated-pause-"+tt.name+"-stage",
+				"stage for repeated pause",
+				conv,
+				proc,
+			)
+			require.NoError(t, err)
+
+			p, err := New(
+				"repeated-pause-"+tt.name+"-pipeline",
+				"pipeline for repeated pause",
+				false,
+				stg,
+			)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				p.SetPause(false)
+			})
+
+			runDone := make(chan error, 1)
+
+			go func() {
+				_, err := p.Run(context.Background(), []int{1})
+				runDone <- err
+			}()
+
+			<-entered
+			require.Equal(t, status.Runnning.String(), p.GetStatus().Value())
+
+			p.SetPause(true)
+			close(release)
+
+			if tt.runErr == nil {
+				require.NoError(t, <-runDone)
+			} else {
+				require.ErrorIs(t, <-runDone, tt.runErr)
+			}
+
+			require.Equal(t, tt.wantStatus.String(), p.GetStatus().Value())
+
+			p.SetPause(true)
+			p.SetPause(false)
+
+			assert.Equal(t, tt.wantStatus.String(), p.GetStatus().Value(),
+				"repeated pause must not resurrect the pre-pause running status")
+		})
+	}
+}
+
 // Regression: a pipeline paused while Run is active must report running as
 // soon as it resumes, before the still-active run completes.
 func TestPipeline_SetPause_resumeMidRunReportsRunning(t *testing.T) {

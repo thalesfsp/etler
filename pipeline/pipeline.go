@@ -134,10 +134,11 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	defer p.pauseMu.Unlock()
 
 	if state {
-		if !p.pause.Paused() {
-			p.statusBeforePause = p.GetStatus().Value()
+		if p.pause.Paused() {
+			return
 		}
 
+		p.statusBeforePause = p.GetStatus().Value()
 		p.GetStatus().Set(status.Paused.String())
 
 		p.pause.Pause()

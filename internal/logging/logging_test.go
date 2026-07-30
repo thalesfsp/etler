@@ -122,6 +122,22 @@ func TestAdmits(t *testing.T) {
 	}
 }
 
+// A non-nil interface can hold a nil logger pointer. Admits must reject it
+// before dispatching GetOutputs through the interface.
+func TestAdmits_typedNilLogger(t *testing.T) {
+	t.Setenv(shared.LevelEnvVar, "")
+	t.Setenv(shared.FilterEnvVar, "")
+
+	var concrete *sypl.Sypl
+	var logger sypl.ISypl = concrete
+	var got bool
+
+	assert.NotPanics(t, func() {
+		got = Admits(logger, level.Error)
+	})
+	assert.False(t, got)
+}
+
 // Get returns a singleton.
 func TestGet_singleton(t *testing.T) {
 	l1 := Get()
