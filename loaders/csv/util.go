@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -34,6 +33,8 @@ var (
 type fieldInfo struct {
 	keys         []string
 	name         string
+	index        []int
+	fieldType    reflect.Type
 	valueType    reflect.Type
 	defaultValue string
 	tagged       bool
@@ -46,6 +47,11 @@ type fieldInfo struct {
 //////
 
 // Load converts a CSV file to the target struct slice (Out).
+//
+// Header matching gives precedence to an exact, case-sensitive csv tag.
+// Otherwise, untagged field names match case-insensitively; if more than one
+// untagged field matches, Load returns an ambiguity error naming the header and
+// competing fields.
 //
 // Load uses gocsv's per-unmarshaller header-renormalization hook and a local
 // encoding/csv reader. However, gocsv has no per-unmarshaller settings for its
@@ -98,10 +104,17 @@ func Load[Out any](in io.Reader) (Out, error) {
 		return *new(Out), err
 	}
 
-	headers := normalizeHeaders(records[0], fields)
-	if err := validateNumbers(records[1:], headers, fields); err != nil {
+	headers, headerFields, err := normalizeHeaders(records[0], fields)
+	if err != nil {
 		return *new(Out), err
 	}
+	if err := validateNumbers(records[1:], headerFields, fields); err != nil {
+		return *new(Out), err
+	}
+	normalizeIntegerRecords(records[1:], headerFields, fields)
+	decoderContent := encodeRecords(records)
+
+	decoderHeaders, manualFields := decoderHeaderAssignments(headers, headerFields, fields)
 
 	prototype := reflect.New(rowType)
 	if outType.Elem().Kind() != reflect.Pointer {
@@ -109,7 +122,7 @@ func Load[Out any](in io.Reader) (Out, error) {
 	}
 
 	unmarshaller, err := gocsv.NewUnmarshaller(
-		stdcsv.NewReader(bytes.NewReader(content)),
+		stdcsv.NewReader(bytes.NewReader(decoderContent)),
 		prototype.Interface(),
 	)
 	if err != nil {
@@ -117,13 +130,14 @@ func Load[Out any](in io.Reader) (Out, error) {
 	}
 
 	if err := unmarshaller.RenormalizeHeaders(func([]string) []string {
-		return headers
+		return decoderHeaders
 	}); err != nil {
 		return *new(Out), err
 	}
 
 	var out Out
 	outValue := reflect.ValueOf(&out).Elem()
+	rowIndex := 0
 
 	for {
 		row, err := unmarshaller.Read()
@@ -134,10 +148,30 @@ func Load[Out any](in io.Reader) (Out, error) {
 			return *new(Out), err
 		}
 
+		row, err = assignManualFields(
+			row,
+			records[rowIndex+1],
+			headerFields,
+			manualFields,
+			fields,
+		)
+		if err != nil {
+			return *new(Out), err
+		}
+
 		outValue.Set(reflect.Append(outValue, reflect.ValueOf(row)))
+		rowIndex++
 	}
 
 	return out, nil
+}
+
+func encodeRecords(records [][]string) []byte {
+	var content bytes.Buffer
+	writer := stdcsv.NewWriter(&content)
+	writer.WriteAll(records)
+
+	return content.Bytes()
 }
 
 func isNil(value any) bool {
@@ -207,6 +241,12 @@ func getFieldInfo(
 			if err != nil {
 				return nil, err
 			}
+			for nestedIndex := range nested {
+				nested[nestedIndex].index = append(
+					[]int{index},
+					nested[nestedIndex].index...,
+				)
+			}
 
 			fields = append(fields, nested...)
 
@@ -222,6 +262,8 @@ func getFieldInfo(
 		}
 
 		if current != nil {
+			current.index = []int{index}
+			current.fieldType = structField.Type
 			current.valueType = fieldType
 			current.custom = hasCustomUnmarshaller(fieldType)
 			fields = append(fields, *current)
@@ -308,55 +350,208 @@ func hasCustomUnmarshaller(fieldType reflect.Type) bool {
 		reflect.PointerTo(fieldType).Implements(textUnmarshallerType)
 }
 
-func normalizeHeaders(headers []string, fields []fieldInfo) []string {
+func normalizeHeaders(
+	headers []string,
+	fields []fieldInfo,
+) ([]string, []int, error) {
 	normalized := append([]string(nil), headers...)
+	headerFields := make([]int, len(headers))
 
 	for index, header := range normalized {
-		if key, found := exactTaggedKey(header, fields); found {
+		headerFields[index] = -1
+
+		if fieldIndex, key, found := exactTaggedField(header, fields); found {
 			normalized[index] = key
+			headerFields[index] = fieldIndex
 
 			continue
 		}
 
-		for _, field := range fields {
+		candidates := make([]int, 0, 1)
+		for fieldIndex, field := range fields {
 			if field.tagged {
 				continue
 			}
 
 			for _, key := range field.keys {
 				if strings.EqualFold(header, key) {
-					normalized[index] = key
+					candidates = append(candidates, fieldIndex)
 
 					break
 				}
 			}
 		}
+
+		if len(candidates) > 1 {
+			names := make([]string, len(candidates))
+			for candidateIndex, fieldIndex := range candidates {
+				names[candidateIndex] = fields[fieldIndex].name
+			}
+
+			return nil, nil, fmt.Errorf(
+				"ambiguous CSV header %q matches fields %s",
+				header,
+				strings.Join(names, ", "),
+			)
+		}
+		if len(candidates) == 1 {
+			fieldIndex := candidates[0]
+			normalized[index] = fields[fieldIndex].keys[0]
+			headerFields[index] = fieldIndex
+		} else if fieldIndex, found := matchingFieldIndex(header, fields); found {
+			headerFields[index] = fieldIndex
+		}
 	}
 
-	return normalized
+	return normalized, headerFields, nil
 }
 
-func exactTaggedKey(header string, fields []fieldInfo) (string, bool) {
-	for _, field := range fields {
+func exactTaggedField(header string, fields []fieldInfo) (int, string, bool) {
+	for fieldIndex, field := range fields {
 		if !field.tagged {
 			continue
 		}
 
 		for _, key := range field.keys {
 			if header == key {
-				return key, true
+				return fieldIndex, key, true
 			}
 		}
 	}
 
-	return "", false
+	return -1, "", false
 }
 
-func validateNumbers(records [][]string, headers []string, fields []fieldInfo) error {
+func decoderHeaderAssignments(
+	headers []string,
+	headerFields []int,
+	fields []fieldInfo,
+) ([]string, map[int]struct{}) {
+	manualFields := make(map[int]struct{})
+	for columnIndex, fieldIndex := range headerFields {
+		if fieldIndex == -1 {
+			continue
+		}
+
+		matchedIndex, found := matchingFieldIndex(headers[columnIndex], fields)
+		if !found || matchedIndex != fieldIndex {
+			manualFields[fieldIndex] = struct{}{}
+		}
+	}
+
+	decoderHeaders := append([]string(nil), headers...)
+	for columnIndex, fieldIndex := range headerFields {
+		if _, manual := manualFields[fieldIndex]; !manual {
+			continue
+		}
+
+		header := fmt.Sprintf("\x00etler-unmatched-%d", columnIndex)
+		for {
+			if _, found := matchingFieldIndex(header, fields); !found {
+				break
+			}
+			header += "\x00"
+		}
+		decoderHeaders[columnIndex] = header
+	}
+
+	return decoderHeaders, manualFields
+}
+
+func assignManualFields(
+	row any,
+	record []string,
+	headerFields []int,
+	manualFields map[int]struct{},
+	fields []fieldInfo,
+) (any, error) {
+	if len(manualFields) == 0 {
+		return row, nil
+	}
+
+	rowValue := reflect.ValueOf(row)
+	isPointer := rowValue.Kind() == reflect.Pointer
+	if isPointer {
+		rowValue = rowValue.Elem()
+	} else {
+		copyValue := reflect.New(rowValue.Type()).Elem()
+		copyValue.Set(rowValue)
+		rowValue = copyValue
+	}
+
+	for columnIndex, fieldIndex := range headerFields {
+		if _, manual := manualFields[fieldIndex]; !manual {
+			continue
+		}
+
+		value := record[columnIndex]
+		if value == "" {
+			value = fields[fieldIndex].defaultValue
+		}
+
+		decoded, err := decodeFieldValue(value, fields[fieldIndex].fieldType)
+		if err != nil {
+			return nil, err
+		}
+		setFieldByIndex(rowValue, fields[fieldIndex].index, decoded)
+	}
+
+	if isPointer {
+		return row, nil
+	}
+
+	return rowValue.Interface(), nil
+}
+
+func decodeFieldValue(value string, fieldType reflect.Type) (reflect.Value, error) {
+	proxyType := reflect.StructOf([]reflect.StructField{{
+		Name: "Value",
+		Type: fieldType,
+	}})
+	prototype := reflect.New(proxyType).Elem()
+
+	unmarshaller, err := gocsv.NewUnmarshaller(
+		stdcsv.NewReader(bytes.NewReader(encodeRecords([][]string{
+			{"Value"},
+			{value},
+		}))),
+		prototype.Interface(),
+	)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	decoded, err := unmarshaller.Read()
+	if err != nil {
+		return reflect.Value{}, err
+	}
+
+	return reflect.ValueOf(decoded).Field(0), nil
+}
+
+func setFieldByIndex(row reflect.Value, index []int, value reflect.Value) {
+	field := row
+	for _, fieldIndex := range index {
+		if field.Kind() == reflect.Pointer {
+			if field.IsNil() {
+				field.Set(reflect.New(field.Type().Elem()))
+			}
+			field = field.Elem()
+		}
+		field = field.Field(fieldIndex)
+	}
+	field.Set(value)
+}
+
+func validateNumbers(records [][]string, headerFields []int, fields []fieldInfo) error {
 	for rowIndex, record := range records {
 		for columnIndex, value := range record {
-			field, found := matchingField(headers[columnIndex], fields)
-			if !found || field.custom || !isNumber(field.valueType.Kind()) {
+			fieldIndex := headerFields[columnIndex]
+			if fieldIndex == -1 {
+				continue
+			}
+
+			field := fields[fieldIndex]
+			if field.custom || !isNumber(field.valueType.Kind()) {
 				continue
 			}
 
@@ -386,19 +581,19 @@ func validateNumbers(records [][]string, headers []string, fields []fieldInfo) e
 	return nil
 }
 
-func matchingField(header string, fields []fieldInfo) (fieldInfo, bool) {
-	for _, field := range fields {
+func matchingFieldIndex(header string, fields []fieldInfo) (int, bool) {
+	for fieldIndex, field := range fields {
 		for _, key := range field.keys {
 			if header == key ||
 				strings.TrimSpace(header) == key ||
 				(field.partial && strings.Contains(header, key)) ||
 				removeZeroWidthCharacters(header) == key {
-				return field, true
+				return fieldIndex, true
 			}
 		}
 	}
 
-	return fieldInfo{}, false
+	return -1, false
 }
 
 func removeZeroWidthCharacters(value string) string {
@@ -431,25 +626,19 @@ func validateNumber(value string, valueType reflect.Type) error {
 
 	switch valueType.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		value = strings.SplitN(value, ".", 2)[0]
-		_, err := strconv.ParseInt(value, 0, valueType.Bits())
+		integer, err := integerDecimalValue(value, false)
+		if err != nil {
+			return err
+		}
+		_, err = strconv.ParseInt(integer, 0, valueType.Bits())
 
 		return err
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if strings.Contains(value, ".") {
-			number, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				return err
-			}
-			if math.IsNaN(number) || math.IsInf(number, 0) || number < 0 ||
-				number >= math.Ldexp(1, valueType.Bits()) {
-				return strconv.ErrRange
-			}
-
-			return nil
+		integer, err := integerDecimalValue(value, true)
+		if err != nil {
+			return err
 		}
-
-		_, err := strconv.ParseUint(value, 0, valueType.Bits())
+		_, err = strconv.ParseUint(integer, 0, valueType.Bits())
 
 		return err
 	case reflect.Float32, reflect.Float64:
@@ -462,4 +651,53 @@ func validateNumber(value string, valueType reflect.Type) error {
 	}
 
 	return nil
+}
+
+func integerDecimalValue(value string, unsigned bool) (string, error) {
+	integer, fraction, decimal := strings.Cut(value, ".")
+	if decimal {
+		for _, character := range fraction {
+			if character < '0' || character > '9' {
+				return "", strconv.ErrSyntax
+			}
+		}
+	}
+
+	if unsigned && strings.HasPrefix(integer, "-") {
+		if strings.Trim(integer[1:], "0") != "" ||
+			(decimal && strings.Trim(fraction, "0") != "") {
+			return "", strconv.ErrRange
+		}
+
+		return "0", nil
+	}
+
+	return integer, nil
+}
+
+func normalizeIntegerRecords(records [][]string, headerFields []int, fields []fieldInfo) {
+	for _, record := range records {
+		for columnIndex, value := range record {
+			fieldIndex := headerFields[columnIndex]
+			if fieldIndex == -1 {
+				continue
+			}
+
+			field := fields[fieldIndex]
+			if field.custom {
+				continue
+			}
+			if value == "" {
+				continue
+			}
+
+			kind := field.valueType.Kind()
+			switch kind {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				record[columnIndex], _ = integerDecimalValue(strings.TrimSpace(value), false)
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+				record[columnIndex], _ = integerDecimalValue(strings.TrimSpace(value), true)
+			}
+		}
+	}
 }
