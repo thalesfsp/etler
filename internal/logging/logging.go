@@ -36,14 +36,19 @@ type Logger struct {
 // Admits reports whether a log call at `lvl` can actually reach an output, so
 // callers can skip building a payload that would be discarded.
 //
-// It mirrors sypl's own fast-gate rule (`(*Sypl).fastGated`) so gating here can
-// never suppress a message sypl would have emitted:
+// It mirrors sypl's own fast-gate rule (`(*Sypl).fastGated`) for output levels
+// and runtime overrides:
 //
 //   - `SYPL_LEVEL` and `SYPL_FILTER` raise levels and filter by component at
 //     runtime, so when either is set this defers to sypl and admits everything.
 //   - `Fatal` always runs the full pipeline — it exits the process.
 //   - Otherwise a call is admitted when any ENABLED output's max level covers
 //     it. Levels are read live, so reconfiguration is observed immediately.
+//
+// Output processors run before sypl's output-level check and may force a
+// message. IProcessor exposes no capability metadata to distinguish those
+// processors; treating every processor as force-capable would disable this gate
+// because etler attaches ChangeFirstCharCase to every output.
 func Admits(l sypl.ISypl, lvl level.Level) bool {
 	if l == nil || lvl == level.None {
 		return false

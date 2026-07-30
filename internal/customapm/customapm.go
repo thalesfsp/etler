@@ -117,12 +117,6 @@ func logAndMetrics(
 	if logging.Admits(l, level.Debug) {
 		message := what + "." + nameOf + "." + operation.String()
 
-		if !apm.DefaultTracer.Active() {
-			l.PrintlnWithOptions(level.Debug, message)
-
-			return
-		}
-
 		l.PrintlnWithOptions(
 			level.Debug,
 			message,

@@ -190,62 +190,40 @@ func TestTrace_spanNameAndType(t *testing.T) {
 	}
 }
 
-// Trace logs when admitted, but only attaches APM correlation fields for an
-// active tracer.
-func TestTrace_logCorrelationTracksTracerActivity(t *testing.T) {
-	tests := []struct {
-		name          string
-		tracerActive  bool
-		wantAPMFields bool
-	}{
-		{
-			name:          "inactive tracer logs without correlation",
-			tracerActive:  false,
-			wantAPMFields: false,
-		},
-		{
-			name:          "active tracer logs with correlation",
-			tracerActive:  true,
-			wantAPMFields: true,
-		},
-	}
+// Trace correlates logs from a transaction supplied by the caller even when the
+// global default tracer is inactive.
+func TestTrace_logsCorrelationFromContextWhenDefaultTracerInactive(t *testing.T) {
+	callerTracer := setRecordingDefaultTracer(t)
+	tx := callerTracer.StartTransaction("caller-owned", "request")
+	ctx := apm.ContextWithTransaction(context.Background(), tx)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setDefaultTracer(t, tt.tracerActive)
+	setDefaultTracer(t, false)
 
-			recorder, recorderOutput := output.Recorder(level.Trace)
-			l := sypl.New("customapm-test", recorderOutput)
+	recorder, recorderOutput := output.Recorder(level.Trace)
+	l := sypl.New("customapm-test", recorderOutput)
 
-			ctx, ender := Trace(
-				context.Background(),
-				"converter",
-				"normalize",
-				status.Runnning,
-				l,
-				nil,
-			)
-			span := ender.span
-			require.NotNil(t, ctx)
-			require.NotNil(t, span)
+	ctx, ender := Trace(
+		ctx,
+		"converter",
+		"normalize",
+		status.Runnning,
+		l,
+		nil,
+	)
+	require.NotNil(t, ctx)
+	require.NotNil(t, ender.span)
 
-			records := recorder.Messages()
-			require.Len(t, records, 1)
-			assert.Equal(t, level.Debug, records[0].Level)
-			assert.Equal(t, "converter.normalize.running\n", records[0].OriginalContent)
+	records := recorder.Messages()
+	require.Len(t, records, 1)
+	assert.Equal(t, level.Debug, records[0].Level)
+	assert.Equal(t, "converter.normalize.running\n", records[0].OriginalContent)
+	assert.Len(t, records[0].Fields, 3)
+	assert.NotEmpty(t, records[0].Fields["trace.id"])
+	assert.NotEmpty(t, records[0].Fields["transaction.id"])
+	assert.NotEmpty(t, records[0].Fields["span.id"])
 
-			if tt.wantAPMFields {
-				assert.Len(t, records[0].Fields, 3)
-				assert.NotEmpty(t, records[0].Fields["trace.id"])
-				assert.NotEmpty(t, records[0].Fields["transaction.id"])
-				assert.NotEmpty(t, records[0].Fields["span.id"])
-			} else {
-				assert.Empty(t, records[0].Fields)
-			}
-
-			ender.End()
-		})
-	}
+	ender.End()
+	tx.End()
 }
 
 // Happy path: Trace creates a transaction when none is in the context,
