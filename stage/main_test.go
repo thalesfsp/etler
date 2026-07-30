@@ -13,8 +13,8 @@ import (
 // example's expected output. Clearing them here keeps the package hermetic
 // without weakening a single assertion.
 func TestMain(m *testing.M) {
-	os.Unsetenv("SYPL_LEVEL")
-	os.Unsetenv("SYPL_FILTER")
+	_ = os.Unsetenv("SYPL_LEVEL")
+	_ = os.Unsetenv("SYPL_FILTER")
 
 	os.Exit(m.Run())
 }

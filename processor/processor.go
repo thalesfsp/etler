@@ -45,7 +45,7 @@ type Processor[ProcessingData any] struct {
 	// async if set will run the processor in a go routine.
 	//
 	// WARN: The output of the processing will not be forwarded!
-	async bool `default:"false" json:"async"`
+	async bool `default:"false"`
 
 	// onFinished is the function that is called when a processor finishes its
 	// execution.
