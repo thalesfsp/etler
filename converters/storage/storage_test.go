@@ -37,9 +37,11 @@ func TestNew(t *testing.T) {
 	csvConverter, err := New(
 		memoryStorage,
 		"test",
-		converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[[]Test, string], originalIn []Test, convertedOut string) {
-			buf.WriteString(c.GetName() + " finished")
-		}),
+		WithConverterOptions(
+			converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[[]Test, string], originalIn []Test, convertedOut string) {
+				buf.WriteString(c.GetName() + " finished")
+			}),
+		),
 	)
 	assert.NoError(t, err)
 
