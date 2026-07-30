@@ -4,6 +4,7 @@ import (
 	"context"
 	"expvar"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
@@ -62,6 +63,8 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	// pause is this pipeline's pause controller. Pausing one pipeline does
 	// not affect any other.
 	pause *shared.PauseController
+	// pauseMu coordinates pause status and controller transitions.
+	pauseMu sync.Mutex
 }
 
 //////
@@ -110,6 +113,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetStatus() *expvar.String {
 
 // GetPaused returns the Paused status of THIS pipeline.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
+	p.pauseMu.Lock()
+	defer p.pauseMu.Unlock()
+
 	if p.pause.Paused() {
 		return status.Paused
 	}
@@ -120,6 +126,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 // SetPause sets the Paused status of THIS pipeline. Its processors pause
 // before their next execution and resume immediately on unpause.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
+	p.pauseMu.Lock()
+	defer p.pauseMu.Unlock()
+
 	if state {
 		p.GetStatus().Set(status.Paused.String())
 
@@ -128,10 +137,14 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 		return
 	}
 
-	// Updates the pipeline's status.
-	p.GetStatus().Set(status.Runnning.String())
+	if p.pause.Paused() {
+		if p.GetStatus().Value() == status.Paused.String() {
+			// Updates the pipeline's status.
+			p.GetStatus().Set(status.Runnning.String())
+		}
 
-	p.pause.Resume()
+		p.pause.Resume()
+	}
 }
 
 // GetOnFinished returns the `OnFinished` function.
@@ -253,6 +266,15 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	)
 	defer span.End()
 
+	now := time.Now()
+	durationSet := false
+
+	defer func() {
+		if !durationSet {
+			p.GetDuration().Set(time.Since(now).Milliseconds())
+		}
+	}()
+
 	// Make this pipeline's pause controller visible to its processors.
 	tracedContext = shared.ContextWithPause(tracedContext, p.pause)
 
@@ -269,9 +291,13 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 
 	// A paused pipeline keeps reporting paused — its processors are about to
 	// block on the pause controller.
+	p.pauseMu.Lock()
+
 	if !p.pause.Paused() {
 		p.GetStatus().Set(status.Runnning.String())
 	}
+
+	p.pauseMu.Unlock()
 
 	if logging.Admits(p.GetLogger(), level.Trace) {
 		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
@@ -281,8 +307,6 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	p.GetProgress().Set(0)
 
 	p.SetProgressPercent()
-
-	now := time.Now()
 
 	//////
 	// Run the pipeline.
@@ -344,6 +368,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		p.SetProgressPercent()
 
 		p.UpdateObservability(ctx, now, originalTask, stagesOut)
+		durationSet = true
 
 		return stagesOut, nil
 	}
@@ -396,6 +421,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	//////
 
 	p.UpdateObservability(ctx, now, originalTask, tasksOut)
+	durationSet = true
 
 	return tasksOut, nil
 }

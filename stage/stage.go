@@ -189,6 +189,15 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	)
 	defer span.End()
 
+	now := time.Now()
+	durationSet := false
+
+	defer func() {
+		if !durationSet {
+			s.GetDuration().Set(time.Since(now).Milliseconds())
+		}
+	}()
+
 	// Update the status.
 	s.GetStatus().Set(status.Runnning.String())
 
@@ -200,8 +209,6 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	s.GetProgress().Set(0)
 
 	s.SetProgressPercent()
-
-	now := time.Now()
 
 	//////
 	// Run stage.
@@ -245,8 +252,14 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 					defer asyncMu.Unlock()
 
 					asyncErrs = append(asyncErrs, err)
+
+					return
 				}
+
+				s.GetProgress().Add(1)
 			}()
+
+			continue
 		} else {
 			// Re-use the output of the previous stage as the input of the
 			// next stage ensuring that the data is processed sequentially.
@@ -263,6 +276,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 				// No goroutine may outlive the stage — join the async
 				// processors before failing.
 				asyncWG.Wait()
+
+				s.SetProgressPercent()
 
 				// Returns whatever is tsk `out` and the error.
 				//
@@ -305,6 +320,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Join the async processors: the stage is not done while they run, and
 	// their failures fail the stage.
 	asyncWG.Wait()
+
+	s.SetProgressPercent()
 
 	asyncErr := errors.Join(asyncErrs...)
 
@@ -361,6 +378,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	// Set duration.
 	s.GetDuration().Set(time.Since(now).Milliseconds())
+	durationSet = true
 
 	// Print the stage's status.
 	if logging.Admits(s.GetLogger(), level.Debug) {

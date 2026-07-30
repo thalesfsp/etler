@@ -3,6 +3,7 @@ package stage
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +84,100 @@ func TestStage_asyncThenSync_runsCorrectProcessor_noRace(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("async processor never ran (wrong processor captured by the goroutine?)")
 	}
+}
+
+// Regression: an async processor is only complete after it returns
+// successfully, not when its goroutine is launched.
+func TestStage_asyncProgress_waitsForSuccessfulCompletion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	processorStarted := make(chan struct{})
+	releaseProcessor := make(chan struct{})
+	converterStarted := make(chan struct{})
+
+	blockingAsync, err := processor.New(
+		"blocking-async-progress-audit",
+		"blocks until the test releases it",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			close(processorStarted)
+			<-releaseProcessor
+
+			return processingData, nil
+		},
+		processor.WithAsync[int](true),
+	)
+	require.NoError(t, err)
+
+	var converterStartedOnce sync.Once
+
+	stg, err := New(
+		"stage-async-progress-audit",
+		"async progress waits for completion",
+		converter.MustDefault(
+			func(ctx context.Context, in int) (int, error) {
+				converterStartedOnce.Do(func() {
+					close(converterStarted)
+				})
+
+				return in, nil
+			},
+		),
+		blockingAsync,
+	)
+	require.NoError(t, err)
+
+	runDone := make(chan error, 1)
+
+	go func() {
+		_, err := stg.Run(ctx, task.MustNew[int, int]([]int{1}))
+		runDone <- err
+	}()
+
+	<-processorStarted
+	<-converterStarted
+
+	assert.Equal(t, int64(0), stg.GetProgress().Value(),
+		"a blocked async processor must not count as complete")
+	assert.NotEqual(t, "100%", stg.GetProgressPercent().Value(),
+		"a blocked async processor must not report full progress")
+
+	close(releaseProcessor)
+	require.NoError(t, <-runDone)
+
+	assert.Equal(t, int64(1), stg.GetProgress().Value())
+	assert.Equal(t, "100%", stg.GetProgressPercent().Value())
+}
+
+// Regression: a failed async processor never contributes completed progress.
+func TestStage_asyncProgress_failureIsNotComplete(t *testing.T) {
+	boom := errors.New("boom-async-progress-audit")
+
+	failingAsync, err := processor.New(
+		"failing-async-progress-audit",
+		"fails asynchronously",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return nil, boom
+		},
+		processor.WithAsync[int](true),
+	)
+	require.NoError(t, err)
+
+	stg, err := New(
+		"stage-async-progress-failure-audit",
+		"failed async work is incomplete",
+		identityConverter(),
+		failingAsync,
+	)
+	require.NoError(t, err)
+
+	_, err = stg.Run(context.Background(), task.MustNew[int, int]([]int{1}))
+	require.ErrorIs(t, err, boom, "the stage must surface the async processor failure")
+
+	assert.Equal(t, int64(0), stg.GetProgress().Value(),
+		"a failed async processor must not count as complete")
+	assert.NotEqual(t, "100%", stg.GetProgressPercent().Value(),
+		"a failed async processor must not report full progress")
 }
 
 // Race: the async goroutine must own a COPY of the data, not just a copy of
@@ -247,6 +342,50 @@ func TestStage_zeroValues_notDropped(t *testing.T) {
 
 	assert.Equal(t, []int{0, 1, 0, 2}, out.ConvertedData,
 		"zero values must not be silently dropped by the converter step")
+}
+
+// Regression: every run replaces the duration metric, including failed runs.
+func TestStage_failedRun_replacesPreviousDuration(t *testing.T) {
+	boom := errors.New("boom-stage-duration-audit")
+
+	runs := 0
+
+	slowThenFail, err := processor.New(
+		"slow-then-fail-stage-duration-audit",
+		"succeeds slowly, then fails fast",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			runs++
+
+			if runs == 1 {
+				time.Sleep(200 * time.Millisecond)
+
+				return processingData, nil
+			}
+
+			return nil, boom
+		},
+	)
+	require.NoError(t, err)
+
+	stg, err := New(
+		"stage-duration-audit",
+		"failed run replaces duration",
+		identityConverter(),
+		slowThenFail,
+	)
+	require.NoError(t, err)
+
+	_, err = stg.Run(context.Background(), task.MustNew[int, int]([]int{1}))
+	require.NoError(t, err)
+
+	successfulDuration := stg.GetDuration().Value()
+	require.Positive(t, successfulDuration)
+
+	_, err = stg.Run(context.Background(), task.MustNew[int, int]([]int{1}))
+	require.ErrorIs(t, err, boom)
+
+	assert.Less(t, stg.GetDuration().Value(), successfulDuration,
+		"the failed stage run must replace the previous successful duration")
 }
 
 // Edge case: a stage without processors must not be created (validation).
