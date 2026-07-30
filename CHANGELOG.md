@@ -27,11 +27,15 @@ Measured (median of three runs):
 
 | Benchmark | Time | Memory | Allocations |
 | --- | --- | --- | --- |
-| Pipeline, 2 stages × 1k items | 19.0 → 7.1 ms | 31.5 → 6.6 MB | 542k → 112k |
-| Stage, 1k items | 9.9 → 3.9 ms | 15.7 → 3.2 MB | 271k → 56k |
-| Stage, single item | 145 → 34 µs | 69 → 28 KB | 762 → 106 |
-| Converter, single call | 58 → 17 µs | 36 → 21 KB | 235 → 21 |
-| CSV loader, 1k rows | 1.09 → 0.93 ms | 821 → 738 KB | 18.9k → 12.9k |
+| Pipeline, 2 stages × 1k items | 19.0 → 7.1 ms (−63%) | 31.5 → 6.6 MB (−79%) | 542k → 112k (−79%) |
+| Stage, 1k items | 9.9 → 3.9 ms (−60%) | 15.7 → 3.2 MB (−79%) | 271k → 56k (−79%) |
+| Stage, single item | 145 → 16.5 µs (−89%) | 69 → 8.4 KB (−88%) | 762 → 97 (−87%) |
+| Processor, 1k items | 71.6 → 4.2 µs (−94%) | 45 → 10.9 KB (−76%) | 236 → 13 (−94%) |
+| Converter, single call | 58.5 → 2.9 µs (−95%) | 36.7 → 2.2 KB (−94%) | 235 → 11 (−95%) |
+| CSV loader, 1k rows | 1.09 → 0.90 ms (−17%) | 821 → 740 KB (−10%) | 18.9k → 12.9k (−31%) |
+
+Recycling the pooled transaction (the trace fix below) is what took the
+single-call paths from ~20 µs to ~3 µs.
 
 No metric, status, counter, or duration write was removed or weakened — only
 discarded logging work is skipped.
