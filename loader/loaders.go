@@ -2,12 +2,12 @@ package loader
 
 import (
 	"context"
-	"errors"
 	"expvar"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/etler/v4/internal/metrics"
@@ -264,10 +264,18 @@ func New[In, Out any](
 
 	// Apply options.
 	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("loader option")
+		}
+
 		c = opt(c)
 		if isNilOptionResult(c) {
-			return nil, errors.New("loader option returned nil")
+			return nil, customerror.NewRequiredError("loader option result")
 		}
+	}
+
+	if err := validateOptionMetrics(c); err != nil {
+		return nil, err
 	}
 
 	// Validation.
@@ -301,5 +309,26 @@ func isNilOptionResult[In, Out any](c ILoader[In, Out]) bool {
 		return value.IsNil()
 	default:
 		return false
+	}
+}
+
+// validateOptionMetrics ensures options retain the metrics dereferenced by
+// loader lifecycle observability.
+func validateOptionMetrics[In, Out any](c ILoader[In, Out]) error {
+	switch {
+	case c.GetStatus() == nil:
+		return customerror.NewRequiredError("loader status metric")
+	case c.GetCounterCreated() == nil:
+		return customerror.NewRequiredError("loader created counter")
+	case c.GetCounterRunning() == nil:
+		return customerror.NewRequiredError("loader running counter")
+	case c.GetCounterFailed() == nil:
+		return customerror.NewRequiredError("loader failed counter")
+	case c.GetCounterDone() == nil:
+		return customerror.NewRequiredError("loader done counter")
+	case c.GetDuration() == nil:
+		return customerror.NewRequiredError("loader duration metric")
+	default:
+		return nil
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/etler/v4/internal/metrics"
@@ -115,6 +116,43 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetStatus() *expvar.String {
 	return p.Status
 }
 
+// setStatus coordinates lifecycle status transitions with this pipeline's
+// pause controller.
+func (p *Pipeline[ProcessedData, ConvertedOut]) setStatus(next status.Status) {
+	p.pauseMu.Lock()
+	defer p.pauseMu.Unlock()
+
+	if p.pause.Paused() {
+		p.statusBeforePause = next.String()
+		p.GetStatus().Set(status.Paused.String())
+
+		return
+	}
+
+	p.GetStatus().Set(next.String())
+}
+
+// onError updates pipeline failure observability while preserving the visible
+// paused status.
+func (p *Pipeline[ProcessedData, ConvertedOut]) onError(
+	tracedContext context.Context,
+	err error,
+	message string,
+) error {
+	p.setStatus(status.Failed)
+
+	return customapm.TraceError(
+		tracedContext,
+		customerror.NewFailedToError(
+			message,
+			customerror.WithError(err),
+			customerror.WithField(Type, p.GetName()),
+		),
+		p.GetLogger(),
+		p.GetCounterFailed(),
+	)
+}
+
 // GetPaused returns the Paused status of THIS pipeline.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	p.pauseMu.Lock()
@@ -218,7 +256,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	p.GetStatus().Set(status.Done.String())
+	p.setStatus(status.Done)
 
 	p.GetCounterDone().Add(1)
 
@@ -304,6 +342,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	// Task initialization.
 	tsk, err := task.New[ProcessedData, ConvertedOut](processingData)
 	if err != nil {
+		p.setStatus(status.Failed)
+
 		return nil, customapm.TraceError(
 			tracedContext,
 			err,
@@ -314,15 +354,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 
 	// A paused pipeline keeps reporting paused — its processors are about to
 	// block on the pause controller.
-	p.pauseMu.Lock()
-
-	if p.pause.Paused() {
-		p.statusBeforePause = status.Runnning.String()
-	} else {
-		p.GetStatus().Set(status.Runnning.String())
-	}
-
-	p.pauseMu.Unlock()
+	p.setStatus(status.Runnning)
 
 	if logging.Admits(p.GetLogger(), level.Trace) {
 		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
@@ -373,15 +405,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
 
-			return nil, shared.OnErrorHandler(
-				tracedContext,
-				p,
-				p.GetLogger(),
-				errs,
-				"run stage",
-				Type,
-				p.GetName(),
-			)
+			return nil, p.onError(tracedContext, errs, "run stage")
 		}
 
 		//////
@@ -411,15 +435,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
 
-			return nil, shared.OnErrorHandler(
-				tracedContext,
-				p,
-				p.GetLogger(),
-				err,
-				"run stage",
-				Type,
-				p.GetName(),
-			)
+			return nil, p.onError(tracedContext, err, "run stage")
 		}
 
 		// Update reference to be used as the input of the next stage.

@@ -2,12 +2,12 @@ package converter
 
 import (
 	"context"
-	"errors"
 	"expvar"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/etler/v4/internal/metrics"
@@ -268,10 +268,18 @@ func New[In, Out any](
 
 	// Apply options.
 	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("converter option")
+		}
+
 		c = opt(c)
 		if isNilOptionResult(c) {
-			return nil, errors.New("converter option returned nil")
+			return nil, customerror.NewRequiredError("converter option result")
 		}
+	}
+
+	if err := validateOptionMetrics(c); err != nil {
+		return nil, err
 	}
 
 	// Validation.
@@ -305,6 +313,27 @@ func isNilOptionResult[In, Out any](c IConverter[In, Out]) bool {
 		return value.IsNil()
 	default:
 		return false
+	}
+}
+
+// validateOptionMetrics ensures options retain the metrics dereferenced by
+// converter lifecycle observability.
+func validateOptionMetrics[In, Out any](c IConverter[In, Out]) error {
+	switch {
+	case c.GetStatus() == nil:
+		return customerror.NewRequiredError("converter status metric")
+	case c.GetCounterCreated() == nil:
+		return customerror.NewRequiredError("converter created counter")
+	case c.GetCounterRunning() == nil:
+		return customerror.NewRequiredError("converter running counter")
+	case c.GetCounterFailed() == nil:
+		return customerror.NewRequiredError("converter failed counter")
+	case c.GetCounterDone() == nil:
+		return customerror.NewRequiredError("converter done counter")
+	case c.GetDuration() == nil:
+		return customerror.NewRequiredError("converter duration metric")
+	default:
+		return nil
 	}
 }
 

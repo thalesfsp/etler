@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 	"time"
 
@@ -14,6 +15,14 @@ import (
 
 type replacementProcessor struct {
 	IProcessor[int]
+}
+
+type processorWithNilStatus struct {
+	IProcessor[int]
+}
+
+func (p *processorWithNilStatus) GetStatus() *expvar.String {
+	return nil
 }
 
 // Bug: OnFinished must receive the processor's OUTPUT, not the input echoed
@@ -91,6 +100,54 @@ func TestProcessor_new_rejectsNilOptionReturn(t *testing.T) {
 			return nil
 		},
 	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// A nil option is invalid input and must be rejected before invocation.
+func TestProcessor_new_rejectsNilOptionWithoutPanic(t *testing.T) {
+	var opt Func[int]
+
+	var (
+		got IProcessor[int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-option-function-processor",
+			"rejects a nil option function",
+			func(ctx context.Context, processingData []int) ([]int, error) {
+				return processingData, nil
+			},
+			opt,
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// An option replacement must retain non-nil metric getters.
+func TestProcessor_new_rejectsNilMetricGetterWithoutPanic(t *testing.T) {
+	var (
+		got IProcessor[int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-metric-getter-processor",
+			"rejects a nil metric getter",
+			func(ctx context.Context, processingData []int) ([]int, error) {
+				return processingData, nil
+			},
+			func(p IProcessor[int]) IProcessor[int] {
+				return &processorWithNilStatus{IProcessor: p}
+			},
+		)
+	})
 
 	assert.Nil(t, got)
 	assert.Error(t, err)

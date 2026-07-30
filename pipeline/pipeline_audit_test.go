@@ -179,8 +179,8 @@ func TestPipeline_SetPause_resumeRestoresTerminalStatus(t *testing.T) {
 	})
 }
 
-// Regression: pausing an already-paused pipeline is a no-op, so a run that
-// finishes while paused keeps its terminal status after the eventual resume.
+// Regression: a run that finishes while paused keeps reporting paused until
+// resume, which restores the terminal status reached in the meantime.
 func TestPipeline_SetPause_repeatedPausePreservesTerminalStatus(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -254,6 +254,9 @@ func TestPipeline_SetPause_repeatedPausePreservesTerminalStatus(t *testing.T) {
 			require.Equal(t, status.Runnning.String(), p.GetStatus().Value())
 
 			p.SetPause(true)
+			require.Equal(t, status.Paused, p.GetPaused())
+			require.Equal(t, status.Paused.String(), p.GetStatus().Value())
+
 			close(release)
 
 			if tt.runErr == nil {
@@ -262,13 +265,21 @@ func TestPipeline_SetPause_repeatedPausePreservesTerminalStatus(t *testing.T) {
 				require.ErrorIs(t, <-runDone, tt.runErr)
 			}
 
-			require.Equal(t, tt.wantStatus.String(), p.GetStatus().Value())
+			require.Equal(t, status.Paused, p.GetPaused(),
+				"a completed run must not unpause its controller")
+			require.Equal(t, status.Paused.String(), p.GetStatus().Value(),
+				"the visible status must agree with the paused controller")
 
 			p.SetPause(true)
+			require.Equal(t, status.Paused, p.GetPaused(),
+				"repeated pause must remain a no-op")
+			require.Equal(t, status.Paused.String(), p.GetStatus().Value())
+
 			p.SetPause(false)
 
+			assert.Equal(t, status.Runnning, p.GetPaused())
 			assert.Equal(t, tt.wantStatus.String(), p.GetStatus().Value(),
-				"repeated pause must not resurrect the pre-pause running status")
+				"resume must restore the terminal status reached while paused")
 		})
 	}
 }
@@ -428,6 +439,8 @@ func TestPipeline_nilAndEmptyInput(t *testing.T) {
 	out, err := p.Run(ctx, nil)
 	assert.Nil(t, out)
 	assert.Error(t, err, "nil input must be rejected")
+	assert.Equal(t, status.Failed.String(), p.GetStatus().Value(),
+		"a nil-input failure must update pipeline status")
 
 	out, err = p.Run(ctx, []int{})
 	require.NoError(t, err, "empty (non-nil) input is a valid, empty run")
