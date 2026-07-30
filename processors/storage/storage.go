@@ -8,8 +8,8 @@ import (
 	"github.com/thalesfsp/concurrentloop"
 	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/dal/v2/storage"
-	"github.com/thalesfsp/etler/v3/internal/shared"
-	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v4/internal/shared"
+	"github.com/thalesfsp/etler/v4/processor"
 	"github.com/thalesfsp/params/v2/create"
 	"github.com/thalesfsp/validation"
 )

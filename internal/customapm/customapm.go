@@ -4,7 +4,7 @@ import (
 	"context"
 	"expvar"
 
-	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/fields"

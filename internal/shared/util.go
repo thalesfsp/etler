@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/thalesfsp/customerror/v2"
-	"github.com/thalesfsp/etler/v3/internal/customapm"
+	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 )

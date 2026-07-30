@@ -9,12 +9,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v3/converter"
-	"github.com/thalesfsp/etler/v3/converters/passthru"
-	"github.com/thalesfsp/etler/v3/pipeline"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/stage"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/converter"
+	"github.com/thalesfsp/etler/v4/converters/passthru"
+	"github.com/thalesfsp/etler/v4/pipeline"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/stage"
+	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/status"
 )
 

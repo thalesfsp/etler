@@ -4,8 +4,8 @@ import (
 	"context"
 	"expvar"
 
-	"github.com/thalesfsp/etler/v3/internal/shared"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/internal/shared"
+	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/status"
 )
 

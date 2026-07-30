@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v3/loader"
+	"github.com/thalesfsp/etler/v4/loader"
 )
 
 type auditRow struct {

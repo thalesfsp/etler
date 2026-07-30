@@ -1,4 +1,4 @@
-module github.com/thalesfsp/etler/v3
+module github.com/thalesfsp/etler/v4
 
 go 1.25.0
 

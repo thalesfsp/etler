@@ -3,7 +3,7 @@ package task
 import (
 	"time"
 
-	"github.com/thalesfsp/etler/v3/internal/shared"
+	"github.com/thalesfsp/etler/v4/internal/shared"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/validation"

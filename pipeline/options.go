@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/task"
 )
 
 //////

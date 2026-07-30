@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thalesfsp/dal/v2/storage"
-	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v4/processor"
 	"github.com/thalesfsp/params/v2/create"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/level"

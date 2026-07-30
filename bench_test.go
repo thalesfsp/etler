@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thalesfsp/etler/v3/converters/passthru"
-	csvloader "github.com/thalesfsp/etler/v3/loaders/csv"
-	"github.com/thalesfsp/etler/v3/pipeline"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/stage"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/converters/passthru"
+	csvloader "github.com/thalesfsp/etler/v4/loaders/csv"
+	"github.com/thalesfsp/etler/v4/pipeline"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/stage"
+	"github.com/thalesfsp/etler/v4/task"
 )
 
 type benchmarkCSVRow struct {
