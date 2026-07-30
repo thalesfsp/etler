@@ -43,6 +43,12 @@ func TestInspectCSVFields_handlesSupportedFieldShapes(t *testing.T) {
 		keys = append(keys, field.keys...)
 	}
 	assert.ElementsMatch(t, []string{"Value", "Parent.Count", "Items", "When"}, keys)
+
+	// An unexported field must never be discovered: reflection cannot set it,
+	// so assigning to one would panic. The literal below also proves the field
+	// is real rather than a name the compiler dropped.
+	require.Equal(t, 42, row{hidden: 42}.hidden)
+	assert.NotContains(t, keys, "hidden")
 }
 
 func TestInspectCSVFields_rejectsCycles(t *testing.T) {
