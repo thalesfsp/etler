@@ -60,7 +60,7 @@ Measured (median of three runs):
 | Stage, single item | 145 → 16.5 µs (−89%) | 69 → 8.4 KB (−88%) | 762 → 97 (−87%) |
 | Processor, 1k items | 71.6 → 4.2 µs (−94%) | 45 → 10.9 KB (−76%) | 236 → 13 (−94%) |
 | Converter, single call | 58.5 → 2.9 µs (−95%) | 36.7 → 2.2 KB (−94%) | 235 → 11 (−95%) |
-| CSV loader, 1k rows | 1.09 → 0.90 ms (−17%) | 821 → 740 KB (−10%) | 18.9k → 12.9k (−31%) |
+| CSV loader, 1k rows | 1.09 → 0.28 ms (−75%) | 821 → 239 KB (−71%) | 18.9k → 7.0k (−63%) |
 
 Recycling the pooled transaction (the trace fix below) is what took the
 single-call paths from ~20 µs to ~3 µs.
