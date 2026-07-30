@@ -11,60 +11,111 @@ import (
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/sypl/v2/output"
 	"github.com/thalesfsp/sypl/v2/shared"
+	"github.com/thalesfsp/sypl/v2/status"
 	"go.elastic.co/apm"
 )
 
 // Admits follows sypl's output max-level rule.
 func TestAdmits(t *testing.T) {
+	t.Setenv(shared.LevelEnvVar, "")
+	t.Setenv(shared.FilterEnvVar, "")
+
 	tests := []struct {
-		name     string
-		maxLevel level.Level
-		logLevel level.Level
-		want     bool
+		name            string
+		outputLevels    []level.Level
+		disabledOutputs map[int]bool
+		nilLogger       bool
+		logLevel        level.Level
+		want            bool
 	}{
 		{
-			name:     "error rejects debug",
-			maxLevel: level.Error,
-			logLevel: level.Debug,
-			want:     false,
+			name:         "error rejects debug",
+			outputLevels: []level.Level{level.Error},
+			logLevel:     level.Debug,
+			want:         false,
 		},
 		{
-			name:     "error admits error",
-			maxLevel: level.Error,
-			logLevel: level.Error,
-			want:     true,
+			name:         "error admits error",
+			outputLevels: []level.Level{level.Error},
+			logLevel:     level.Error,
+			want:         true,
 		},
 		{
-			name:     "debug admits debug",
-			maxLevel: level.Debug,
-			logLevel: level.Debug,
-			want:     true,
+			name:         "debug admits debug",
+			outputLevels: []level.Level{level.Debug},
+			logLevel:     level.Debug,
+			want:         true,
 		},
 		{
-			name:     "debug rejects trace",
-			maxLevel: level.Debug,
-			logLevel: level.Trace,
-			want:     false,
+			name:         "debug rejects trace",
+			outputLevels: []level.Level{level.Debug},
+			logLevel:     level.Trace,
+			want:         false,
 		},
 		{
-			name:     "trace admits debug",
-			maxLevel: level.Trace,
-			logLevel: level.Debug,
-			want:     true,
+			name:         "trace admits debug",
+			outputLevels: []level.Level{level.Trace},
+			logLevel:     level.Debug,
+			want:         true,
 		},
 		{
-			name:     "trace admits trace",
-			maxLevel: level.Trace,
-			logLevel: level.Trace,
-			want:     true,
+			name:         "trace admits trace",
+			outputLevels: []level.Level{level.Trace},
+			logLevel:     level.Trace,
+			want:         true,
+		},
+		{
+			name:         "none is rejected",
+			outputLevels: []level.Level{level.Trace},
+			logLevel:     level.None,
+			want:         false,
+		},
+		{
+			name:      "nil logger is rejected",
+			nilLogger: true,
+			logLevel:  level.Error,
+			want:      false,
+		},
+		{
+			name:            "disabled output is ignored",
+			outputLevels:    []level.Level{level.Trace},
+			disabledOutputs: map[int]bool{0: true},
+			logLevel:        level.Debug,
+			want:            false,
+		},
+		{
+			name:         "highest enabled output wins",
+			outputLevels: []level.Level{level.Error, level.Trace, level.Debug},
+			logLevel:     level.Debug,
+			want:         true,
+		},
+		{
+			name:            "disabled higher output does not admit",
+			outputLevels:    []level.Level{level.Error, level.Trace},
+			disabledOutputs: map[int]bool{1: true},
+			logLevel:        level.Debug,
+			want:            false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, o := output.SafeBuffer(level.Error)
-			l := sypl.New("admission-test", o)
-			l.SetMaxLevel(tt.maxLevel)
+			var l sypl.ISypl
+
+			if !tt.nilLogger {
+				outputs := make([]output.IOutput, 0, len(tt.outputLevels))
+
+				for i, maxLevel := range tt.outputLevels {
+					_, o := output.SafeBuffer(maxLevel)
+					if tt.disabledOutputs[i] {
+						o.SetStatus(status.Disabled)
+					}
+
+					outputs = append(outputs, o)
+				}
+
+				l = sypl.New("admission-test", outputs...)
+			}
 
 			assert.Equal(t, tt.want, Admits(l, tt.logLevel))
 		})
@@ -112,6 +163,11 @@ func TestToAPM_withTransactionAndSpan(t *testing.T) {
 // honours them only on its slow path. Gating on the outputs' configured max
 // level alone would silently defeat them, so Admits must defer.
 func TestAdmits_deferToSyplWhenEnvRaisesLevel(t *testing.T) {
+	// Start from a known-clean environment so the baseline below holds even for
+	// a developer who exports either var.
+	t.Setenv(shared.LevelEnvVar, "")
+	t.Setenv(shared.FilterEnvVar, "")
+
 	l := sypl.NewDefault("admits-env", level.Error)
 
 	// Baseline: with no env var set, a debug call cannot reach an

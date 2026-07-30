@@ -40,6 +40,11 @@ func TestRun_logsRunningWhenDebugIsAdmitted(t *testing.T) {
 }
 
 func TestRun_errorLevelStillUpdatesMetricsAndStatus(t *testing.T) {
+	// Hermetic: either env var makes the level gate defer to sypl, which would
+	// let the debug logs through and defeat what this test pins.
+	t.Setenv("SYPL_LEVEL", "")
+	t.Setenv("SYPL_FILTER", "")
+
 	recorder, recorderOutput := output.Recorder(level.Error)
 
 	conv, err := New(
