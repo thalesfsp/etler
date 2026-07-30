@@ -135,25 +135,97 @@ func TestLoad_rejectsOverflowThroughPartialTag(t *testing.T) {
 	assert.ErrorContains(t, err, "out of range")
 }
 
-func TestLoad_usesGocsvNumericSyntax(t *testing.T) {
+func TestLoad_rejectsNonDecimalIntegerSyntax(t *testing.T) {
+	t.Run("fraction", func(t *testing.T) {
+		out, err := Load[[]struct{ N int8 }](strings.NewReader("N\n127.9\n"))
+		assert.Nil(t, out)
+		require.EqualError(t, err,
+			`parse error on line 2, column 1: value "127.9" in column "N" does not use strict decimal syntax for int8`,
+		)
+	})
+
+	t.Run("leading zero", func(t *testing.T) {
+		out, err := Load[[]struct{ N int }](strings.NewReader("N\n010\n"))
+		assert.Nil(t, out)
+		require.EqualError(t, err,
+			`parse error on line 2, column 1: value "010" in column "N" does not use strict decimal syntax for int`,
+		)
+	})
+
+	t.Run("underscore", func(t *testing.T) {
+		out, err := Load[[]struct{ N int }](strings.NewReader("N\n1_0\n"))
+		assert.Nil(t, out)
+		require.EqualError(t, err,
+			`parse error on line 2, column 1: value "1_0" in column "N" does not use strict decimal syntax for int`,
+		)
+	})
+}
+
+func TestLoad_acceptsStrictDecimalNumericSyntax(t *testing.T) {
 	type row struct {
-		N int
+		Integer int
+		Float   float64
 	}
 
-	for _, testCase := range []struct {
-		value string
-		want  int
-	}{
-		{value: "127.9", want: 127},
-		{value: "010", want: 8},
-		{value: "1_0", want: 10},
+	out, err := Load[[]row](strings.NewReader(
+		"Integer,Float\n42,1.5\n-42,-1.5\n0,1e3\n,\n",
+	))
+	require.NoError(t, err)
+	require.Equal(t, []row{
+		{Integer: 42, Float: 1.5},
+		{Integer: -42, Float: -1.5},
+		{Float: 1000},
+		{},
+	}, out)
+}
+
+func TestLoad_rejectsOtherNonDecimalNumericSyntax(t *testing.T) {
+	for _, value := range []string{
+		"+42",
+		"-01",
+		"0x10",
+		"0o10",
+		"0b10",
+		" 42",
+		"42 ",
 	} {
-		t.Run(testCase.value, func(t *testing.T) {
-			out, err := Load[[]row](strings.NewReader("N\n" + testCase.value + "\n"))
-			require.NoError(t, err)
-			require.Equal(t, []row{{N: testCase.want}}, out)
+		t.Run("integer "+value, func(t *testing.T) {
+			out, err := Load[[]struct{ N int }](strings.NewReader("N\n" + value + "\n"))
+			assert.Nil(t, out)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "strict decimal syntax")
 		})
 	}
+
+	for _, value := range []string{
+		"+1.5",
+		"1_0.5",
+		" 1.5",
+		"1.5 ",
+		".5",
+		"1.",
+		"NaN",
+		"Inf",
+		"1e+3",
+	} {
+		t.Run("float "+value, func(t *testing.T) {
+			out, err := Load[[]struct{ N float64 }](strings.NewReader("N\n" + value + "\n"))
+			assert.Nil(t, out)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "strict decimal syntax")
+		})
+	}
+}
+
+func TestLoad_leavesNonNumericFieldsUntouchedByNumericValidation(t *testing.T) {
+	type row struct {
+		Text string
+		N    int
+	}
+
+	out, err := Load[[]row](strings.NewReader("Text,N\n 1_0 ,42\n"))
+	require.NoError(t, err)
+	require.Equal(t, []row{{Text: " 1_0 ", N: 42}}, out)
 }
 
 func TestLoad_matchesUntaggedFieldsCaseInsensitively(t *testing.T) {

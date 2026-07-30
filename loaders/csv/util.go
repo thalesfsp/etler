@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,7 +17,13 @@ import (
 	"github.com/thalesfsp/customerror/v2"
 )
 
-var csvUnmarshallerType, textUnmarshallerType = reflect.TypeFor[gocsv.TypeUnmarshaller](), reflect.TypeFor[encoding.TextUnmarshaler]()
+var (
+	csvUnmarshallerType   = reflect.TypeFor[gocsv.TypeUnmarshaller]()
+	textUnmarshallerType  = reflect.TypeFor[encoding.TextUnmarshaler]()
+	strictIntegerPattern  = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
+	strictUnsignedPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+	strictFloatPattern    = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?([eE]-?[0-9]+)?$`)
+)
 
 type csvField struct {
 	keys    []string
@@ -31,13 +37,16 @@ type csvField struct {
 // case-insensitively. Exact csv tags win; folded collisions and duplicate exact
 // tags are errors.
 //
-// Other behavior comes from gocsv's streaming Unmarshaller: default= is not
+// Numeric fields use strict decimal syntax validated by etler: an optional
+// leading minus and digits, with multi-digit integers forbidden from starting
+// with zero. Floats may add fractional digits and an exponent with an optional
+// minus. A plus sign is not accepted. Other behavior comes from gocsv's
+// Unmarshaller: default= is not
 // applied; omitempty preserves nil pointers; duplicate headers assign in order;
 // unmatched columns are ignored; and missing columns stay zero. TagName,
 // TagSeparator, FieldsCombiner, the header normalizer, FailIfDoubleHeaderNames,
 // and ShouldAlignDuplicateHeadersWithStructFieldOrder influence Load. The CSV
 // reader factory and FailIfUnmatchedStructTags do not.
-// Native numeric syntax and conversion otherwise follow gocsv.
 func Load[Out any](in io.Reader) (Out, error) {
 	if isNil(in) {
 		return *new(Out), customerror.NewRequiredError("CSV reader")
@@ -68,8 +77,11 @@ func Load[Out any](in io.Reader) (Out, error) {
 		}
 		return *new(Out), err
 	}
-	var source bytes.Buffer
-	csvReader := stdcsv.NewReader(io.TeeReader(reader, &source))
+	source, err := io.ReadAll(reader)
+	if err != nil {
+		return *new(Out), err
+	}
+	csvReader := stdcsv.NewReader(bytes.NewReader(source))
 	prototype := reflect.New(rowType)
 	if outType.Elem().Kind() != reflect.Pointer {
 		prototype = prototype.Elem()
@@ -80,6 +92,9 @@ func Load[Out any](in io.Reader) (Out, error) {
 	}
 	headers, err := normalizeCSVHeaders(unmarshaller.Headers, fields)
 	if err != nil {
+		return *new(Out), err
+	}
+	if err := validateNumericValues(source, headers, fields); err != nil {
 		return *new(Out), err
 	}
 	if err := unmarshaller.RenormalizeHeaders(func([]string) []string {
@@ -98,9 +113,6 @@ func Load[Out any](in io.Reader) (Out, error) {
 			return *new(Out), err
 		}
 		outValue.Set(reflect.Append(outValue, reflect.ValueOf(row)))
-	}
-	if err := checkNarrowNumericRanges(source.Bytes(), headers, fields); err != nil {
-		return *new(Out), err
 	}
 	return out, nil
 }
@@ -263,7 +275,7 @@ func ambiguousHeaderError(header string, fields []csvField) error {
 	return fmt.Errorf("ambiguous CSV header %q matches fields %s", header, strings.Join(names, ", "))
 }
 
-func checkNarrowNumericRanges(source []byte, headers []string, fields []csvField) error {
+func validateNumericValues(source []byte, headers []string, fields []csvField) error {
 	records, err := stdcsv.NewReader(bytes.NewReader(source)).ReadAll()
 	if err != nil || len(records) < 2 {
 		return err
@@ -288,13 +300,24 @@ func checkNarrowNumericRanges(source []byte, headers []string, fields []csvField
 				continue
 			}
 			field := headerFields[column]
-			if hasCustomUnmarshaller(field.typ) || !numericRangeError(value, field.typ) {
+			if hasCustomUnmarshaller(field.typ) {
 				continue
 			}
+			valueErr := numericValueError(value, field.typ)
+			if valueErr == nil {
+				continue
+			}
+			message := fmt.Sprintf("value %q in column %q", value, records[0][column])
+			if errors.Is(valueErr, strconv.ErrRange) {
+				message += fmt.Sprintf(" is out of range for %s", field.typ)
+			} else {
+				message += fmt.Sprintf(" does not use strict decimal syntax for %s", field.typ)
+			}
 			return &stdcsv.ParseError{
-				Line:   rowIndex + 2,
-				Column: column + 1,
-				Err:    fmt.Errorf("value %q for field %s is out of range for %s", value, field.name, field.typ),
+				StartLine: rowIndex + 2,
+				Line:      rowIndex + 2,
+				Column:    column + 1,
+				Err:       errors.New(message),
 			}
 		}
 	}
@@ -317,41 +340,33 @@ func matchesGocsvHeader(header string, field csvField) bool {
 	return false
 }
 
-func numericRangeError(value string, typ reflect.Type) bool {
+func numericValueError(value string, typ reflect.Type) error {
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
-	value = strings.TrimSpace(value)
 	if value == "" {
-		return false
+		return nil
 	}
 	switch typ.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if typ.Bits() == 64 {
-			return false
+		if !strictIntegerPattern.MatchString(value) {
+			return strconv.ErrSyntax
 		}
-		integer, _, _ := strings.Cut(value, ".")
-		_, err := strconv.ParseInt(integer, 0, typ.Bits())
-		return errors.Is(err, strconv.ErrRange)
+		_, err := strconv.ParseInt(value, 10, typ.Bits())
+		return err
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if typ.Bits() == 64 {
-			return false
+		if !strictUnsignedPattern.MatchString(value) {
+			return strconv.ErrSyntax
 		}
-		if strings.Contains(value, ".") {
-			number, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				return false
-			}
-			truncated := math.Trunc(number)
-			maximum := math.Pow(2, float64(typ.Bits())) - 1
-			return truncated < 0 || truncated > maximum
+		_, err := strconv.ParseUint(value, 10, typ.Bits())
+		return err
+	case reflect.Float32, reflect.Float64:
+		if !strictFloatPattern.MatchString(value) {
+			return strconv.ErrSyntax
 		}
-		_, err := strconv.ParseUint(value, 0, typ.Bits())
-		return errors.Is(err, strconv.ErrRange)
-	case reflect.Float32:
-		_, err := strconv.ParseFloat(strings.ReplaceAll(value, ",", "."), 32)
-		return errors.Is(err, strconv.ErrRange)
+		_, err := strconv.ParseFloat(value, typ.Bits())
+		return err
 	default:
-		return false
+		return nil
 	}
 }

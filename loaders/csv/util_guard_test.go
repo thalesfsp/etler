@@ -2,6 +2,7 @@ package csv
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -56,9 +57,13 @@ func TestInspectCSVFields_rejectsCycles(t *testing.T) {
 	assert.ErrorContains(t, err, "cyclic CSV output type")
 }
 
-func TestNumericRangeError_unsignedFractions(t *testing.T) {
-	assert.False(t, numericRangeError("255.9", reflect.TypeFor[uint8]()))
-	assert.True(t, numericRangeError("256.0", reflect.TypeFor[uint8]()))
-	assert.True(t, numericRangeError("-1.0", reflect.TypeFor[uint8]()))
-	assert.False(t, numericRangeError("bad.0", reflect.TypeFor[uint8]()))
+func TestNumericValueError_validatesSyntaxAndRange(t *testing.T) {
+	assert.NoError(t, numericValueError("", reflect.TypeFor[*int]()))
+	assert.NoError(t, numericValueError("255", reflect.TypeFor[uint8]()))
+	assert.NoError(t, numericValueError("-1.5e-2", reflect.TypeFor[float32]()))
+	assert.NoError(t, numericValueError("not numeric", reflect.TypeFor[string]()))
+	assert.ErrorIs(t, numericValueError("255.9", reflect.TypeFor[uint8]()), strconv.ErrSyntax)
+	assert.ErrorIs(t, numericValueError("256", reflect.TypeFor[uint8]()), strconv.ErrRange)
+	assert.ErrorIs(t, numericValueError("-1", reflect.TypeFor[uint8]()), strconv.ErrSyntax)
+	assert.ErrorIs(t, numericValueError("1_0", reflect.TypeFor[int]()), strconv.ErrSyntax)
 }

@@ -64,11 +64,12 @@ func TestLoad_malformedCSV_returnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestLoad_invalidInteger_returnsParseError(t *testing.T) {
+func TestLoad_invalidInteger_returnsStrictSyntaxError(t *testing.T) {
 	out, err := Load[[]auditRow](strings.NewReader("Name,Age\nalice,abc\n"))
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, `strconv.ParseInt: parsing "abc": invalid syntax`)
+	assert.ErrorContains(t, err, `value "abc" in column "Age"`)
+	assert.ErrorContains(t, err, "strict decimal syntax")
 }
 
 func TestLoad_nonSliceOutput_returnsErrorWithoutPanic(t *testing.T) {
