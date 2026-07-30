@@ -25,6 +25,14 @@ func TestConverter_metadata(t *testing.T) {
 	m := c.GetMetrics()
 	assert.Contains(t, m, "status")
 	assert.Contains(t, m, "counterCreated")
+
+	// The callback field is intentionally unexported; accessors are the
+	// supported mutation path and therefore cannot bypass its mutex.
+	c.SetOnFinished(func(ctx context.Context, c IConverter[int, int], originalIn, convertedOut int) {})
+	assert.NotNil(t, c.GetOnFinished())
+
+	c.SetOnFinished(nil)
+	assert.Nil(t, c.GetOnFinished())
 }
 
 // Default happy path.

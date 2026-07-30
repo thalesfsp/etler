@@ -44,9 +44,9 @@ type Stage[ProcessingData, ConvertedData any] struct {
 	// Name of the stage.
 	Name string `json:"name" validate:"required"`
 
-	// OnFinished is the function that is called when a processor finishes its
+	// onFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[ProcessingData, ConvertedData] `json:"-"`
+	onFinished OnFinished[ProcessingData, ConvertedData] `json:"-"`
 
 	// Processors to be run tsk the stage.
 	Processors []processor.IProcessor[ProcessingData] `json:"processors" validate:"required,gt=0"`
@@ -63,7 +63,7 @@ type Stage[ProcessingData, ConvertedData any] struct {
 	ProgressPercent *expvar.String `json:"progressPercent"`
 	Status          *expvar.String `json:"status"`
 
-	// mu guards OnFinished.
+	// mu guards onFinished.
 	mu sync.RWMutex
 }
 
@@ -142,7 +142,7 @@ func (s *Stage[ProcessingData, ConvertedData]) GetOnFinished() OnFinished[Proces
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return s.OnFinished
+	return s.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
@@ -150,7 +150,7 @@ func (s *Stage[ProcessingData, ConvertedData]) SetOnFinished(onFinished OnFinish
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.OnFinished = onFinished
+	s.onFinished = onFinished
 }
 
 // GetType returns the entity type.
@@ -425,6 +425,14 @@ func New[ProcessingData, ConvertedData any](
 	conversor converter.IConverter[ProcessingData, ConvertedData],
 	processors ...processor.IProcessor[ProcessingData],
 ) (IStage[ProcessingData, ConvertedData], error) {
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
 	s := &Stage[ProcessingData, ConvertedData]{
 		Logger:     logging.Get().New(name).SetTags(Type, name),
 		Processors: processors,

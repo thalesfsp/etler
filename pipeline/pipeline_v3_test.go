@@ -37,9 +37,16 @@ func TestPipeline_metadataAndOnFinishedOption(t *testing.T) {
 		called = true
 	})(p)
 
+	// The callback field is intentionally unexported; accessors are the
+	// supported mutation path and therefore cannot bypass its mutex.
+	assert.NotNil(t, p.GetOnFinished())
+
 	_, err = p.Run(ctx, []int{1})
 	require.NoError(t, err)
 	assert.True(t, called, "the OnFinished set via option must run")
+
+	p.SetOnFinished(nil)
+	assert.Nil(t, p.GetOnFinished())
 }
 
 // Regression: after a CONCURRENT run, the final progress percentage must be
