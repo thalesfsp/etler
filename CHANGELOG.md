@@ -9,19 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - [ ] Create and Update should allow to pass more than one object per time (Bulk Create and Update)
 
-## [3.1.0] - 2026-07-29
+## [4.0.0] - 2026-07-30
+
+Major release. Module path is now `github.com/thalesfsp/etler/v4`.
 
 Second audit pass: bug and race fixes, a large efficiency improvement, and
-coverage raised to 99.4%. No breaking API changes.
+coverage raised to ~99%.
+
+### Breaking changes
+- **Module path** is `github.com/thalesfsp/etler/v4`. Consumers must update
+  their imports.
+- **`OnFinished` and `Async` are no longer exported fields.** Their accessors
+  (`GetOnFinished`/`SetOnFinished`, `GetAsync`/`SetAsync`) are unchanged and are
+  now the only way to reach them. With the fields exported, a caller could
+  assign them directly and race with a running `Run`, which made the
+  synchronisation bypassable. A consequence: the processor's `async` field no
+  longer appears in marshalled JSON.
+- **`Stage`, `Processor`, `Converter` and `Loader` gained unexported fields**
+  (the mutexes above), so unkeyed composite literals of those structs no longer
+  compile. Use the factories, as before.
+- **The CSV loader now decodes directly into the target type** with
+  [gocsv](https://github.com/gocarina/gocsv) — the same library the CSV
+  *converter* already used for writing. Reading and writing are therefore
+  symmetric, and plain `int`, `float64` and `bool` struct fields now work.
+  Structs are mapped by `csv:"..."` tag instead of `json:"..."`, and the
+  `json:"age,string"` workaround is no longer needed. The loader also no longer
+  strips tab characters from values, which previously corrupted legitimately
+  quoted content such as `"a\tb"`.
+- **Storage writes now use a deterministic id** derived from the item, instead
+  of a fresh UUID per attempt, so retrying after a timeout overwrites rather
+  than duplicating. Options are available to supply a custom id function or name
+  the id field.
+- **`processor.New("")` returns an error.** `Name` is now required, matching
+  every other entity.
 
 ### Performance
 Profiling attributed roughly 85% of all allocations to log messages that were
 built in full and then discarded by the level filter. Log payload construction
 on every run path is now gated behind the same emit rule sypl itself applies, so
 that work only happens when a message will actually be written. Span names use
-concatenation instead of `fmt.Sprintf`, APM correlation fields are skipped when
-the tracer is inactive, and the CSV loader drops a regexp in favour of
-`strings.ReplaceAll` and pre-sizes its rows.
+concatenation instead of `fmt.Sprintf`, and the CSV loader no longer round-trips
+its rows through a map and a JSON encode/decode pass.
 
 Measured (median of three runs):
 
@@ -89,20 +117,6 @@ pipeline or stage instance must not be `Run` concurrently with itself.
   data-loss bug, async failure, pause/resume, and context cancellation.
 - Total coverage 96.8% → 99.4%; `processors/storage`, `converters/storage`,
   `converters/csv` and `converters/passthru` are at 100%, `loaders/csv` at 96.9%.
-
-### Compatibility notes
-No exported symbol, signature, or interface method changed. Two things are worth
-calling out:
-- `processor.New("")` now returns an error instead of succeeding.
-- `Stage`, `Processor`, `Converter` and `Loader` gained unexported fields (the
-  mutexes above), so an unkeyed composite literal of those structs no longer
-  compiles. Use the factories, as before.
-
-### Known limitations (deferred — they need a breaking change)
-- Storage writes generate a fresh UUID per attempt, so retrying after a timeout
-  can duplicate rows. A fix requires a caller-supplied or content-derived ID.
-- The CSV loader routes values through JSON as strings, so plain numeric and
-  boolean struct fields need a `,string` tag on the JSON field.
 
 ## [3.0.0] - 2026-07-03
 
