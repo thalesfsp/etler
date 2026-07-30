@@ -15,6 +15,34 @@ import (
 	"go.elastic.co/apm"
 )
 
+type loggerValueGuard struct {
+	sypl.ISypl
+}
+
+func TestIsNilLogger_values(t *testing.T) {
+	var plainNil sypl.ISypl
+	var typedNil *sypl.Sypl
+	nonNil := loggerValueGuard{
+		ISypl: sypl.NewDefault("non-nil-logger-guard", level.Error),
+	}
+
+	tests := []struct {
+		name  string
+		value sypl.ISypl
+		want  bool
+	}{
+		{name: "plain nil", value: plainNil, want: true},
+		{name: "typed nil pointer", value: typedNil, want: true},
+		{name: "non-nil value", value: nonNil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNilLogger(tt.value))
+		})
+	}
+}
+
 // Admits follows sypl's output max-level rule.
 func TestAdmits(t *testing.T) {
 	t.Setenv(shared.LevelEnvVar, "")
