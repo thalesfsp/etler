@@ -30,8 +30,16 @@ func GenerateUUID() string {
 
 // Flatten2D takes a 2D slice and returns a 1D slice containing all the elements.
 func Flatten2D[T any](data [][]T) []T {
-	var result []T
+	total := 0
+	for _, outer := range data {
+		total += len(outer)
+	}
 
+	if total == 0 {
+		return nil
+	}
+
+	result := make([]T, 0, total)
 	for _, outer := range data {
 		result = append(result, outer...)
 	}
@@ -43,8 +51,36 @@ func Flatten2D[T any](data [][]T) []T {
 //
 // NOTE: Only exported fields are considered.
 func ExtractID[T any](t T, idFieldName string) string {
-	v := reflect.ValueOf(t)
-	for v.Kind() == reflect.Pointer {
+	return extractID(reflect.ValueOf(t), idFieldName, make(map[extractIDPointer]struct{}))
+}
+
+type extractIDPointer struct {
+	address uintptr
+	typ     reflect.Type
+}
+
+func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer]struct{}) string {
+	// Unwrap pointers and interfaces alike: an embedded interface field holds
+	// its value indirectly, and the traversal has to reach the concrete struct
+	// behind it. Pointers are recorded so a cycle terminates instead of
+	// recursing until the stack overflows.
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return ""
+		}
+
+		if v.Kind() == reflect.Pointer {
+			pointer := extractIDPointer{
+				address: v.Pointer(),
+				typ:     v.Type(),
+			}
+			if _, ok := visited[pointer]; ok {
+				return ""
+			}
+
+			visited[pointer] = struct{}{}
+		}
+
 		v = v.Elem()
 	}
 
@@ -76,7 +112,7 @@ func ExtractID[T any](t T, idFieldName string) string {
 	for i := 0; i < tType.NumField(); i++ {
 		field := tType.Field(i)
 		if field.Anonymous && field.IsExported() {
-			if id := ExtractID(v.Field(i).Interface(), idFieldName); id != "" {
+			if id := extractID(v.Field(i), idFieldName, visited); id != "" {
 				return id
 			}
 		}
@@ -87,7 +123,7 @@ func ExtractID[T any](t T, idFieldName string) string {
 
 // Unmarshal with custom error.
 func Unmarshal(data []byte, v any) error {
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := json.Unmarshal(data, v); err != nil {
 		return customerror.NewFailedToError("to unmarshal",
 			customerror.WithError(err),
 		)
