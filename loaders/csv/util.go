@@ -112,7 +112,11 @@ func Load[Out any](in io.Reader) (Out, error) {
 		return *new(Out), err
 	}
 	normalizeIntegerRecords(records[1:], headerFields, fields)
-	decoderContent := encodeRecords(records)
+
+	decoderContent, err := encodeRecords(records)
+	if err != nil {
+		return *new(Out), err
+	}
 
 	decoderHeaders, manualFields := decoderHeaderAssignments(headers, headerFields, fields)
 
@@ -166,12 +170,17 @@ func Load[Out any](in io.Reader) (Out, error) {
 	return out, nil
 }
 
-func encodeRecords(records [][]string) []byte {
+func encodeRecords(records [][]string) ([]byte, error) {
 	var content bytes.Buffer
-	writer := stdcsv.NewWriter(&content)
-	writer.WriteAll(records)
 
-	return content.Bytes()
+	writer := stdcsv.NewWriter(&content)
+	if err := writer.WriteAll(records); err != nil {
+		return nil, customerror.NewFailedToError("re-encode CSV records",
+			customerror.WithError(err),
+		)
+	}
+
+	return content.Bytes(), nil
 }
 
 func isNil(value any) bool {
@@ -510,11 +519,13 @@ func decodeFieldValue(value string, fieldType reflect.Type) (reflect.Value, erro
 	}})
 	prototype := reflect.New(proxyType).Elem()
 
+	encoded, err := encodeRecords([][]string{{"Value"}, {value}})
+	if err != nil {
+		return reflect.Value{}, err
+	}
+
 	unmarshaller, err := gocsv.NewUnmarshaller(
-		stdcsv.NewReader(bytes.NewReader(encodeRecords([][]string{
-			{"Value"},
-			{value},
-		}))),
+		stdcsv.NewReader(bytes.NewReader(encoded)),
 		prototype.Interface(),
 	)
 	if err != nil {
