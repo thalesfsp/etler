@@ -34,7 +34,8 @@ type Stage[ProcessingData, ConvertedData any] struct {
 	// Description of the stage.
 	Description string `json:"description"`
 
-	// Conversor to be used tsk the stage.
+	// Conversor to be used tsk the stage. Its conversion function must be safe
+	// for concurrent use.
 	Conversor converter.IConverter[ProcessingData, ConvertedData] `json:"-" validate:"required"`
 
 	// Logger is the internal logger.
@@ -61,6 +62,9 @@ type Stage[ProcessingData, ConvertedData any] struct {
 	Progress        *expvar.Int    `json:"progress"`
 	ProgressPercent *expvar.String `json:"progressPercent"`
 	Status          *expvar.String `json:"status"`
+
+	// mu guards OnFinished.
+	mu sync.RWMutex
 }
 
 //////
@@ -135,11 +139,17 @@ func (s *Stage[ProcessingData, ConvertedData]) GetStatus() *expvar.String {
 
 // GetOnFinished returns the `OnFinished` function.
 func (s *Stage[ProcessingData, ConvertedData]) GetOnFinished() OnFinished[ProcessingData, ConvertedData] {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return s.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (s *Stage[ProcessingData, ConvertedData]) SetOnFinished(onFinished OnFinished[ProcessingData, ConvertedData]) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.OnFinished = onFinished
 }
 
@@ -173,7 +183,8 @@ func (s *Stage[ProcessingData, ConvertedData]) GetMetrics() map[string]string {
 	}
 }
 
-// Run the transform function.
+// Run the transform function. A stage instance must not run concurrently with
+// itself; separate instances run independently.
 func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task.Task[ProcessingData, ConvertedData]) (task.Task[ProcessingData, ConvertedData], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -231,7 +242,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	// NOTE: It process the data sequentially.
 	for _, proc := range s.Processors {
-		if proc.GetAsync() {
+		async := proc.GetAsync()
+		if async {
 			// The goroutine gets its own copy of the data as it was at this
 			// processor's position in the chain. A slice-header snapshot
 			// isn't enough: a later sync processor mutating the slice in
@@ -372,8 +384,9 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	tsk.ConvertedData = convertedData
 
-	if s.GetOnFinished() != nil {
-		s.GetOnFinished()(ctx, s, originalTask, tsk)
+	onFinished := s.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, s, originalTask, tsk)
 	}
 
 	// Set duration.
@@ -404,7 +417,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 // Factory.
 //////
 
-// New returns a new stage.
+// New returns a new stage. The conversor must be safe for concurrent use
+// because Run converts items concurrently.
 func New[ProcessingData, ConvertedData any](
 	name string,
 	description string,

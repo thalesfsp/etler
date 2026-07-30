@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"expvar"
+	"sync"
 	"time"
 
 	"github.com/thalesfsp/etler/v3/internal/customapm"
@@ -22,8 +23,9 @@ import (
 // Type of the entity.
 const Type = "processor"
 
-// Transform is a function that transforms (`processingData`) into
-// (`processingData`), returning any errors that occurred during processing.
+// Transform transforms `processingData`, returning the processed data and any
+// error. It must not mutate its input slice or pointed-to values; stages reuse
+// results and async processors receive only a shallow copy.
 type Transform[ProcessedData any] func(ctx context.Context, processingData []ProcessedData) (processedOut []ProcessedData, err error)
 
 // Processor definition.
@@ -59,6 +61,9 @@ type Processor[ProcessingData any] struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	Duration  *expvar.Int    `json:"duration"`
 	Status    *expvar.String `json:"status"`
+
+	// mu guards Async and OnFinished.
+	mu sync.RWMutex
 }
 
 //////
@@ -112,11 +117,17 @@ func (p *Processor[ProcessingData]) GetStatus() *expvar.String {
 
 // GetOnFinished returns the `OnFinished` function.
 func (p *Processor[ProcessingData]) GetOnFinished() OnFinished[ProcessingData] {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (p *Processor[ProcessingData]) SetOnFinished(onFinished OnFinished[ProcessingData]) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	p.OnFinished = onFinished
 }
 
@@ -148,15 +159,22 @@ func (p *Processor[ProcessingData]) GetMetrics() map[string]string {
 	}
 }
 
-// SetAsync if set will run the processor in a go routine.
+// SetAsync if set will run the processor in a go routine. Async processors get
+// a shallow copy, so transforms must not mutate input or pointed-to values.
 //
 // WARN: The output of the processing will not be forwarded!
 func (p *Processor[ProcessingData]) SetAsync(async bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	p.Async = async
 }
 
 // GetAsync returns if the processor is running in a go routine.
 func (p *Processor[ProcessingData]) GetAsync() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.Async
 }
 
@@ -256,8 +274,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	//////
 
 	// Run onEvent callback with the original input and the processed output.
-	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, originalProcessingData, o)
+	onFinished := p.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, p, originalProcessingData, o)
 	}
 
 	// Update status.
