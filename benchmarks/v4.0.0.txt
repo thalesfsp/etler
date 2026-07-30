@@ -1,0 +1,27 @@
+# etler v4.0.0 — go test -run '^$' -bench . -benchtime 100x -count 3 .
+# macOS 26.6, go version go1.26.5 darwin/arm64
+
+goos: darwin
+goarch: arm64
+pkg: github.com/thalesfsp/etler/v4
+cpu: Apple M4 Pro
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    356518 ns/op	  411154 B/op	   11078 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    314250 ns/op	  411100 B/op	   11078 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    292842 ns/op	  411099 B/op	   11078 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   2855104 ns/op	 3216746 B/op	   55899 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   3004253 ns/op	 3224047 B/op	   56102 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   2961380 ns/op	 3205915 B/op	   55882 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     10632 ns/op	    8572 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     10462 ns/op	    7504 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     10546 ns/op	    8635 B/op	      94 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5776393 ns/op	 6596740 B/op	  111842 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5665058 ns/op	 6596398 B/op	  111736 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5658065 ns/op	 6596678 B/op	  111619 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2661 ns/op	   10867 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2752 ns/op	   11899 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2544 ns/op	   11701 B/op	      13 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2234 ns/op	    4125 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      1975 ns/op	    3469 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      1913 ns/op	    3266 B/op	      12 allocs/op
+PASS
+ok  	github.com/thalesfsp/etler/v4	3.030s

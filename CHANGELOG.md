@@ -68,12 +68,15 @@ committed at [`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the
 
 | Benchmark | Time | Memory | Allocations |
 | --- | --- | --- | --- |
-| Pipeline, 2 stages × 1k items | 19.0 → 7.1 ms (−63%) | 31.5 → 6.6 MB (−79%) | 542k → 112k (−79%) |
-| Stage, 1k items | 9.9 → 3.9 ms (−60%) | 15.7 → 3.2 MB (−79%) | 271k → 56k (−79%) |
-| Stage, single item | 145 → 17.2 µs (−88%) | 69.5 → 8.4 KB (−88%) | 762 → 93 (−88%) |
-| Processor, 1k items | 71.6 → 3.9 µs (−95%) | 45 → 11.5 KB (−74%) | 236 → 13 (−94%) |
-| Converter, single call | 58.5 → 3.3 µs (−94%) | 36.7 → 3.3 KB (−91%) | 235 → 12 (−95%) |
-| CSV loader, 1k rows | 1.09 → 0.28 ms (−75%) | 821 → 239 KB (−71%) | 18.9k → 7.0k (−63%) |
+| Pipeline, 2 stages × 1k items | 19.0 → 5.7 ms (−70%) | 30.0 → 6.3 MB (−79%) | 542k → 112k (−79%) |
+| Stage, 1k items | 9.7 → 3.0 ms (−69%) | 14.9 → 3.1 MB (−79%) | 271k → 56k (−79%) |
+| Stage, single item | 145 → 10.5 µs (−93%) | 68 → 8 KB (−88%) | 762 → 93 (−88%) |
+| Processor, 1k items | 71.6 → 2.7 µs (−96%) | 44 → 11 KB (−74%) | 236 → 13 (−94%) |
+| Converter, single call | 58.5 → 2.0 µs (−97%) | 36 → 3 KB (−91%) | 235 → 12 (−95%) |
+| CSV loader, 1k rows | 1.09 → 0.31 ms (−71%) | 802 → 401 KB (−50%) | 18.9k → 11.1k (−41%) |
+
+Every figure above is the median of the three runs in the committed files, and
+can be recomputed from them.
 
 Recycling the pooled transaction (the trace fix below) is what took the
 single-call paths from ~20 µs to ~3 µs.
