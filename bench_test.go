@@ -15,8 +15,8 @@ import (
 )
 
 type benchmarkCSVRow struct {
-	Name string `json:"name"`
-	Age  int    `json:"age,string"`
+	Name string `csv:"name"`
+	Age  int    `csv:"age"`
 }
 
 var (

@@ -20,8 +20,8 @@ import (
 )
 
 type person struct {
-	Name string `json:"name"`
-	Age  int    `json:"age,string"`
+	Name string `csv:"name"`
+	Age  int    `csv:"age"`
 }
 
 // E2E happy path: CSV text -> loader -> two sequential stages (uppercase,
