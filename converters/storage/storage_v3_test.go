@@ -54,6 +54,36 @@ func (s *stubStorage) Create(ctx context.Context, id, target string, v any, prm 
 	return id, nil
 }
 
+// Missing storage is rejected during construction, including an interface
+// containing a typed nil pointer.
+func TestNew_nilStorage(t *testing.T) {
+	tests := []struct {
+		name    string
+		storage storage.IStorage
+	}{
+		{name: "nil interface"},
+		{name: "typed nil", storage: (*stubStorage)(nil)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var constructorErr error
+
+			require.NotPanics(t, func() {
+				s, err := New[v3Doc](test.storage, "etl")
+				constructorErr = err
+
+				// Exercise the pre-fix construction result to prove that an
+				// accepted nil storage would panic on first use.
+				if err == nil {
+					_, _ = s.Run(context.Background(), v3Doc{Name: "alice"})
+				}
+			})
+			require.Error(t, constructorErr)
+		})
+	}
+}
+
 // Must returns a working storage converter (happy path): converting a value
 // persists it and yields its ID.
 func TestMust_happyPath(t *testing.T) {

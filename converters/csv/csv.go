@@ -36,6 +36,10 @@ func New[In any](
 		Name,
 		fmt.Sprintf("%s %s", Name, converter.Type),
 		func(tracedContext context.Context, in []In) (string, error) {
+			if err := tracedContext.Err(); err != nil {
+				return "", err
+			}
+
 			return gocsv.MarshalString(in)
 		},
 		opts...,

@@ -3,8 +3,10 @@ package storage
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/thalesfsp/concurrentloop"
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/dal/v2/storage"
 	"github.com/thalesfsp/etler/v3/internal/shared"
 	"github.com/thalesfsp/etler/v3/processor"
@@ -40,6 +42,17 @@ func New[In any](
 ) (*Storage[In], error) {
 	// Enforces interface implementation.
 	var _ processor.IProcessor[In] = (*Storage[In])(nil)
+
+	if s == nil {
+		return nil, customerror.NewRequiredError("storage")
+	}
+
+	switch reflect.ValueOf(s).Kind() {
+	case reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if reflect.ValueOf(s).IsNil() {
+			return nil, customerror.NewRequiredError("storage")
+		}
+	}
 
 	//////
 	// Allows to control the concurrency.

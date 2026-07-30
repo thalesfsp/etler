@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -154,4 +155,47 @@ func TestNew_outerValidationFailure_returnsError(t *testing.T) {
 	got, err := New[v3Row](invalidateAfterInnerValidation)
 	assert.Nil(t, got)
 	assert.Error(t, err)
+}
+
+// A context that is already done prevents conversion and does not count the
+// run as completed.
+func TestCSV_run_contextAlreadyDone(t *testing.T) {
+	tests := []struct {
+		name       string
+		newContext func() (context.Context, context.CancelFunc)
+		target     error
+	}{
+		{
+			name: "cancelled",
+			newContext: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+
+				return ctx, cancel
+			},
+			target: context.Canceled,
+		},
+		{
+			name: "deadline exceeded",
+			newContext: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			},
+			target: context.DeadlineExceeded,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := test.newContext()
+			defer cancel()
+
+			c, err := New[v3Row]()
+			require.NoError(t, err)
+
+			_, err = c.Run(ctx, []v3Row{{Name: "alice", Age: 30}})
+			assert.Error(t, err)
+			assert.True(t, errors.Is(err, test.target))
+			assert.Equal(t, int64(0), c.GetCounterDone().Value())
+		})
+	}
 }
