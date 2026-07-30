@@ -178,7 +178,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 
 	p.GetStatus().Set(status.Runnning.String())
 
-	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	if logging.Admits(p.GetLogger(), level.Trace) {
+		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	}
 
 	// Store as reference to be used in the OnFinished function.
 	originalProcessingData := processingData
@@ -198,7 +200,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		p.GetStatus().Set(status.Paused.String())
 
 		// Notifiy user.
-		p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
+		if logging.Admits(p.GetLogger(), level.Trace) {
+			p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
+		}
 
 		// Blocks until resumed, or until the context is done.
 		if err := pc.Wait(tracedContext); err != nil {
@@ -266,17 +270,19 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	p.GetDuration().Set(time.Since(now).Milliseconds())
 
 	// Print the stage's status.
-	p.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", p.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", p.GetCounterCreated().String()),
-		sypl.WithField("counterDone", p.GetCounterDone().String()),
-		sypl.WithField("counterFailed", p.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", p.GetCounterRunning().String()),
-		sypl.WithField("duration", p.GetDuration().String()),
-		sypl.WithField("status", p.GetStatus().String()),
-	)
+	if logging.Admits(p.GetLogger(), level.Debug) {
+		p.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", p.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", p.GetCounterCreated().String()),
+			sypl.WithField("counterDone", p.GetCounterDone().String()),
+			sypl.WithField("counterFailed", p.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", p.GetCounterRunning().String()),
+			sypl.WithField("duration", p.GetDuration().String()),
+			sypl.WithField("status", p.GetStatus().String()),
+		)
+	}
 
 	return o, nil
 }

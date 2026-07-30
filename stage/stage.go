@@ -192,7 +192,9 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Update the status.
 	s.GetStatus().Set(status.Runnning.String())
 
-	s.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	if logging.Admits(s.GetLogger(), level.Trace) {
+		s.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	}
 
 	// Progress is relative to the current run.
 	s.GetProgress().Set(0)
@@ -361,19 +363,21 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	s.GetDuration().Set(time.Since(now).Milliseconds())
 
 	// Print the stage's status.
-	s.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", s.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", s.GetCounterCreated().String()),
-		sypl.WithField("counterDone", s.GetCounterDone().String()),
-		sypl.WithField("counterFailed", s.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", s.GetCounterRunning().String()),
-		sypl.WithField("duration", s.GetDuration().String()),
-		sypl.WithField("progress", s.GetProgress().String()),
-		sypl.WithField("progressPercent", s.GetProgressPercent().String()),
-		sypl.WithField("status", s.GetStatus().String()),
-	)
+	if logging.Admits(s.GetLogger(), level.Debug) {
+		s.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", s.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", s.GetCounterCreated().String()),
+			sypl.WithField("counterDone", s.GetCounterDone().String()),
+			sypl.WithField("counterFailed", s.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", s.GetCounterRunning().String()),
+			sypl.WithField("duration", s.GetDuration().String()),
+			sypl.WithField("progress", s.GetProgress().String()),
+			sypl.WithField("progressPercent", s.GetProgressPercent().String()),
+			sypl.WithField("status", s.GetStatus().String()),
+		)
+	}
 
 	return tsk, nil
 }

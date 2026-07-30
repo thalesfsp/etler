@@ -8,6 +8,7 @@ import (
 	"github.com/thalesfsp/sypl/v2/fields"
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/sypl/v2/processor"
+	"github.com/thalesfsp/sypl/v2/status"
 	"go.elastic.co/apm"
 )
 
@@ -29,6 +30,21 @@ type Logger struct {
 //////
 // Exported functionalities.
 //////
+
+// Admits reports whether any enabled logger output admits lvl.
+func Admits(l sypl.ISypl, lvl level.Level) bool {
+	if l == nil || lvl == level.None {
+		return false
+	}
+
+	for _, o := range l.GetOutputs() {
+		if o.GetStatus() == status.Enabled && lvl <= o.GetMaxLevel() {
+			return true
+		}
+	}
+
+	return false
+}
 
 // Get returns a setup logger, or set it up. Default level is `ERROR`.
 //
