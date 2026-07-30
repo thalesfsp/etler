@@ -3,26 +3,17 @@ package csv
 import (
 	"encoding/csv"
 	"io"
-	"regexp"
+	"strings"
 
 	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v3/internal/shared"
 )
 
 //////
-// Consts, vars and types.
-//////
-
-// Compile the regular expression
-var pattern = regexp.MustCompile(`\t`)
-
-//////
 // Helpers.
 //////
 
 // Load a CSV file and converts it to target struct (Out).
-//
-//nolint:prealloc
 func Load[Out any](in io.Reader) (Out, error) {
 	// Create a new CSV reader
 	reader := csv.NewReader(in)
@@ -40,18 +31,21 @@ func Load[Out any](in io.Reader) (Out, error) {
 
 	// Define a slice to hold the JSON objects
 	var jsonData []map[string]string
+	if len(records) > 1 {
+		jsonData = make([]map[string]string, 0, len(records)-1)
+	}
 
 	// Get the header row to use as keys
 	header := records[0]
 
 	// Process each record (except the header row)
 	for _, record := range records[1:] {
-		obj := make(map[string]string)
+		obj := make(map[string]string, len(header))
 
 		// Create key-value pairs using the header and record values
 		for i, value := range record {
-			// Remove whitespace characters from the string using the compiled regex
-			obj[header[i]] = pattern.ReplaceAllString(value, "")
+			// Remove tab characters from the string.
+			obj[header[i]] = strings.ReplaceAll(value, "\t", "")
 		}
 
 		// Append the object to the jsonData slice

@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/thalesfsp/etler/v3/loader"
-	"github.com/thalesfsp/validation"
 )
 
 //////
@@ -55,11 +54,6 @@ func New[Out any](
 
 	// NOTE: `opts` were already applied by `loader.New` — applying them
 	// again here would run each option twice.
-
-	// Validation.
-	if err := validation.Validate(csv); err != nil {
-		return nil, err
-	}
 
 	return csv, nil
 }
