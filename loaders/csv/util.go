@@ -65,7 +65,7 @@ func Load[Out any](in io.Reader) (Out, error) {
 	}
 
 	rowType := outType.Elem()
-	if rowType.Kind() == reflect.Ptr {
+	if rowType.Kind() == reflect.Pointer {
 		rowType = rowType.Elem()
 	}
 
@@ -104,7 +104,7 @@ func Load[Out any](in io.Reader) (Out, error) {
 	}
 
 	prototype := reflect.New(rowType)
-	if outType.Elem().Kind() != reflect.Ptr {
+	if outType.Elem().Kind() != reflect.Pointer {
 		prototype = prototype.Elem()
 	}
 
@@ -147,7 +147,7 @@ func isNil(value any) bool {
 
 	reflected := reflect.ValueOf(value)
 	switch reflected.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return reflected.IsNil()
 	default:
 		return false
@@ -189,7 +189,7 @@ func getFieldInfo(
 		}
 
 		fieldType := structField.Type
-		if fieldType.Kind() == reflect.Ptr {
+		if fieldType.Kind() == reflect.Pointer {
 			fieldType = fieldType.Elem()
 		}
 

@@ -124,10 +124,12 @@ requires Go 1.25. Beyond that:
 - `OnFinished` and `Async` are no longer exported struct fields — use the
   `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
   signatures are unchanged.
-- The CSV loader now maps struct fields by `csv:"..."` tag (or exact field
-  name) instead of `json:"..."`, matching the CSV converter. Plain `int`,
-  `float64` and `bool` fields now decode correctly, so the old
-  `json:"age,string"` workaround should be removed.
+- The CSV loader now maps struct fields by `csv:"..."` tag instead of
+  `json:"..."`, matching the CSV converter. Untagged fields still match their
+  header case-insensitively, as before. Plain `int`, `float64` and `bool`
+  fields now decode correctly — remove the old `json:"age,string"` workaround —
+  and a value that does not fit its field is now an error rather than a silent
+  wraparound.
 - The storage constructors take their own option type. Entity options that used
   to be passed directly must now be wrapped:
   `storage.New[Item](s, "target", storage.WithConverterOptions(opt))` — and

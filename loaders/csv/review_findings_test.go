@@ -260,7 +260,7 @@ func TestCSVHelpers(t *testing.T) {
 			embedded
 			Visible int `csv:"number,partial,default=7,omitempty"`
 			Ignored int `csv:"-"`
-			hidden  int
+			hidden  int // unexported: must be skipped by field discovery
 			Nested  struct {
 				Count int
 			}
@@ -291,6 +291,21 @@ func TestCSVHelpers(t *testing.T) {
 		ignoredField, ignored := newFieldInfo(reflect.TypeFor[row]().Field(2), nil)
 		assert.Nil(t, ignoredField)
 		assert.True(t, ignored)
+
+		// An unexported field must never be discovered: it cannot be set, so
+		// including it would panic at assignment time.
+		hiddenField := reflect.TypeFor[row]().Field(3)
+		require.Equal(t, "hidden", hiddenField.Name)
+		require.False(t, hiddenField.IsExported())
+		require.Equal(t, 42, row{hidden: 42}.hidden, "the field is real and settable in-package")
+
+		// The exported check lives in getFieldInfo, not newFieldInfo, so it is
+		// the discovered set that must exclude it. An unexported field cannot
+		// be set through reflection, so discovering one would panic on assign.
+		for _, f := range fields {
+			assert.NotContains(t, f.keys, "hidden")
+			assert.NotEqual(t, "hidden", f.name)
+		}
 
 		assert.True(t, isCSVScalar(reflect.TypeFor[time.Time]()))
 		assert.False(t, isCSVScalar(reflect.TypeFor[struct{ Value int }]()))

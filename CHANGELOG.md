@@ -33,10 +33,12 @@ coverage raised to ~99%.
   [gocsv](https://github.com/gocarina/gocsv) — the same library the CSV
   *converter* already used for writing. Reading and writing are therefore
   symmetric, and plain `int`, `float64` and `bool` struct fields now work.
-  Structs are mapped by `csv:"..."` tag instead of `json:"..."`, and the
-  `json:"age,string"` workaround is no longer needed. The loader also no longer
-  strips tab characters from values, which previously corrupted legitimately
-  quoted content such as `"a\tb"`.
+  Structs are mapped by `csv:"..."` tag instead of `json:"..."` (untagged
+  fields still match their header case-insensitively), and the
+  `json:"age,string"` workaround is no longer needed. A value that does not fit
+  its destination field is now an error instead of a silent wraparound. The
+  loader also no longer strips tab characters from values, which previously
+  corrupted legitimately quoted content such as `"a\tb"`.
 - **Storage writes now use a stable id** derived from the item, instead of a
   fresh UUID per attempt, so retrying after a timeout reuses the same key rather
   than inserting under a new one. Whether that overwrites or is rejected is the
