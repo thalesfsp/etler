@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -25,6 +26,8 @@ type v3Item struct {
 type stubStorage struct {
 	storage.IStorage
 
+	mu       sync.Mutex
+	ids      []string
 	created  atomic.Int64
 	failWith error
 }
@@ -45,6 +48,10 @@ func (s *stubStorage) Create(ctx context.Context, id, target string, v any, prm 
 		return "", err
 	}
 
+	s.mu.Lock()
+	s.ids = append(s.ids, id)
+	s.mu.Unlock()
+
 	if s.failWith != nil {
 		return "", s.failWith
 	}
@@ -52,6 +59,13 @@ func (s *stubStorage) Create(ctx context.Context, id, target string, v any, prm 
 	s.created.Add(1)
 
 	return id, nil
+}
+
+func (s *stubStorage) createdIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.ids...)
 }
 
 // Missing storage is rejected during construction, including an interface
@@ -190,7 +204,12 @@ func TestNew_validationFailures_returnErrorNotPanic(t *testing.T) {
 			)
 
 			require.NotPanics(t, func() {
-				got, err = New[v3Item](&stubStorage{}, 1, "v3-invalid-", tt.opt)
+				got, err = New[v3Item](
+					&stubStorage{},
+					1,
+					"v3-invalid-",
+					WithProcessorOptions(tt.opt),
+				)
 			})
 
 			assert.Nil(t, got)
@@ -208,7 +227,12 @@ func TestMust_validationFailure_panics(t *testing.T) {
 	}
 
 	assert.Panics(t, func() {
-		Must[v3Item](&stubStorage{}, 1, "v3-invalid-", nilFunc)
+		Must[v3Item](
+			&stubStorage{},
+			1,
+			"v3-invalid-",
+			WithProcessorOptions(nilFunc),
+		)
 	})
 }
 
@@ -226,7 +250,12 @@ func TestNew_outerValidationFailure_returnsError(t *testing.T) {
 		return p
 	}
 
-	got, err := New[v3Item](&stubStorage{}, 1, "v3-invalid-", invalidateAfterInnerValidation)
+	got, err := New[v3Item](
+		&stubStorage{},
+		1,
+		"v3-invalid-",
+		WithProcessorOptions(invalidateAfterInnerValidation),
+	)
 	assert.Nil(t, got)
 	assert.Error(t, err)
 }

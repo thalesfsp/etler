@@ -38,10 +38,12 @@ func TestNew(t *testing.T) {
 		memoryStorage,
 		1,
 		"test-",
-		processor.WithOnFinished(
-			func(ctx context.Context, c processor.IProcessor[Test], originalIn []Test, processedOut []Test) {
-				buf.WriteString(c.GetName() + " finished")
-			}),
+		WithProcessorOptions(
+			processor.WithOnFinished(
+				func(ctx context.Context, c processor.IProcessor[Test], originalIn []Test, processedOut []Test) {
+					buf.WriteString(c.GetName() + " finished")
+				}),
+		),
 	)
 	assert.NoError(t, err)
 

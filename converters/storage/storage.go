@@ -25,15 +25,90 @@ type Storage[In any] struct {
 	converter.IConverter[In, string] `json:"converter" validate:"required"`
 }
 
+// IDFunc derives a storage ID from an item.
+type IDFunc[In any] func(in In) string
+
+type config[In any] struct {
+	idFunc           IDFunc[In]
+	idFuncSet        bool
+	idFieldName      string
+	converterOptions []converter.Func[In, string]
+}
+
+// Func allows storage converter options to be specified.
+type Func[In any] func(c *config[In])
+
+//////
+// Options.
+//////
+
+// WithIDFunc sets the function used to derive a storage ID from an item.
+func WithIDFunc[In any](idFunc IDFunc[In]) Func[In] {
+	return func(c *config[In]) {
+		c.idFunc = idFunc
+		c.idFuncSet = true
+	}
+}
+
+// WithIDFieldName sets the struct field read for an item's storage ID.
+func WithIDFieldName[In any](idFieldName string) Func[In] {
+	return func(c *config[In]) {
+		c.idFieldName = idFieldName
+	}
+}
+
+// WithConverterOptions applies options to the underlying converter.
+func WithConverterOptions[In any](opts ...converter.Func[In, string]) Func[In] {
+	return func(c *config[In]) {
+		c.converterOptions = append(c.converterOptions, opts...)
+	}
+}
+
+func resolveID[In any](cfg config[In], in In) (string, error) {
+	if cfg.idFuncSet {
+		if cfg.idFunc == nil {
+			return "", customerror.NewRequiredError(
+				"custom id function",
+				customerror.WithMessage("custom id function is nil"),
+			)
+		}
+
+		id := cfg.idFunc(in)
+		if id == "" {
+			return "", customerror.NewRequiredError(
+				"custom id",
+				customerror.WithMessage("custom id function returned an empty id"),
+			)
+		}
+
+		return id, nil
+	}
+
+	if id := shared.ExtractID(in, cfg.idFieldName); id != "" {
+		return id, nil
+	}
+
+	content, err := shared.Marshal(in)
+	if err != nil {
+		return "", customerror.NewFailedToError(
+			"derive storage id from content",
+			customerror.WithError(err),
+		)
+	}
+
+	return shared.GenerateIDBasedOnContent(string(content)), nil
+}
+
 //////
 // Factory.
 //////
 
-// New creates a new Storage converter.
+// New creates a new Storage converter. IDs are derived deterministically from
+// each item, making writes idempotent when callers retry the same item.
 func New[In any](
 	s storage.IStorage,
 	target string,
-	opts ...converter.Func[In, string],
+	opts ...Func[In],
 ) (*Storage[In], error) {
 	// Enforces interface implementation.
 	var _ converter.IConverter[In, string] = (*Storage[In])(nil)
@@ -49,13 +124,36 @@ func New[In any](
 		}
 	}
 
+	cfg := config[In]{}
+
+	// Apply options before building the transform so it captures the resolved
+	// storage configuration.
+	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("storage converter option")
+		}
+
+		opt(&cfg)
+	}
+
+	for _, opt := range cfg.converterOptions {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("converter option")
+		}
+	}
+
 	conv, err := converter.New(
 		Name,
 		fmt.Sprintf("%s %s", Name, converter.Type),
 		func(tracedContext context.Context, in In) (string, error) {
-			return s.Create(tracedContext, shared.GenerateUUID(), target, in, &create.Create{})
+			id, err := resolveID(cfg, in)
+			if err != nil {
+				return "", err
+			}
+
+			return s.Create(tracedContext, id, target, in, &create.Create{})
 		},
-		opts...,
+		cfg.converterOptions...,
 	)
 	if err != nil {
 		return nil, err
@@ -77,7 +175,7 @@ func New[In any](
 func Must[In any](
 	s storage.IStorage,
 	target string,
-	opts ...converter.Func[In, string],
+	opts ...Func[In],
 ) *Storage[In] {
 	c, err := New(s, target, opts...)
 	if err != nil {
