@@ -14,12 +14,37 @@ import (
 )
 
 type auditRow struct {
-	Name string `json:"name"`
-	Age  int    `json:"age,string"`
+	Name   string
+	Age    int
+	Score  float64
+	Active bool
 }
 
-// Bug: empty input must return an error, not panic on a missing header row.
-func TestLoad_emptyInput_returnsError(t *testing.T) {
+func TestLoad_happyPath_decodesTypedFields(t *testing.T) {
+	in := "Name,Age,Score,Active\nalice,30,98.5,true\nbob,0,-1.25,false\n"
+
+	out, err := Load[[]auditRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditRow{
+		{Name: "alice", Age: 30, Score: 98.5, Active: true},
+		{Name: "bob", Age: 0, Score: -1.25, Active: false},
+	}, out)
+}
+
+type auditTaggedRow struct {
+	DisplayName string `csv:"display_name"`
+	Count       int
+}
+
+func TestLoad_mapsCSVTagsAndUntaggedFieldNames(t *testing.T) {
+	in := "display_name,Count\nAlice Example,3\n"
+
+	out, err := Load[[]auditTaggedRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditTaggedRow{{DisplayName: "Alice Example", Count: 3}}, out)
+}
+
+func TestLoad_emptyInput_returnsMissingHeaderError(t *testing.T) {
 	assert.NotPanics(t, func() {
 		out, err := Load[[]auditRow](strings.NewReader(""))
 		assert.Nil(t, out)
@@ -27,75 +52,60 @@ func TestLoad_emptyInput_returnsError(t *testing.T) {
 	})
 }
 
-// Edge case: a header-only CSV yields a nil slice and no error.
-func TestLoad_headerOnly_returnsEmpty(t *testing.T) {
-	out, err := Load[[]auditRow](strings.NewReader("name,age\n"))
+func TestLoad_headerOnly_returnsNilSlice(t *testing.T) {
+	out, err := Load[[]auditRow](strings.NewReader("Name,Age,Score,Active\n"))
 	require.NoError(t, err)
 	assert.Nil(t, out)
 }
 
-// Bad path: malformed CSV (unbalanced quote) must return an error.
 func TestLoad_malformedCSV_returnsError(t *testing.T) {
-	_, err := Load[[]auditRow](strings.NewReader("name,age\n\"broken,30\n"))
+	out, err := Load[[]auditRow](strings.NewReader("Name,Age\n\"broken,30\n"))
+	assert.Nil(t, out)
 	assert.Error(t, err)
 }
 
-// Bad path: a value that cannot be unmarshalled into the target type must
-// return an error.
-func TestLoad_typeMismatch_returnsError(t *testing.T) {
-	tests := []struct {
-		name string
-		load func() error
-		want string
-	}{
-		{
-			name: "field type cannot accept CSV string",
-			load: func() error {
-				_, err := Load[[]auditRow](strings.NewReader("name,age\nalice,not-a-number\n"))
-				return err
-			},
-			want: "invalid use of ,string struct tag, trying to unmarshal \"not-a-number\" into int",
-		},
-		{
-			name: "output struct cannot accept row slice",
-			load: func() error {
-				_, err := Load[auditRow](strings.NewReader("name,age\nalice,30\n"))
-				return err
-			},
-			want: "cannot unmarshal array into Go value of type csv.auditRow",
-		},
-	}
+func TestLoad_invalidInteger_returnsParseError(t *testing.T) {
+	out, err := Load[[]auditRow](strings.NewReader("Name,Age\nalice,abc\n"))
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `strconv.ParseInt: parsing "abc": invalid syntax`)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.NotPanics(t, func() {
-				err := tt.load()
-				require.Error(t, err)
-				assert.ErrorContains(t, err, tt.want)
-			})
-		})
-	}
+	var parseErr *csv.ParseError
+	require.ErrorAs(t, err, &parseErr)
+	assert.Equal(t, 2, parseErr.Line)
+	assert.Equal(t, 2, parseErr.Column)
 }
 
-// Happy path: rows map to the target struct; tabs are stripped from values.
-func TestLoad_happyPath_mapsRowsAndStripsTabs(t *testing.T) {
-	out, err := Load[[]auditRow](strings.NewReader("name,age\na\tlice,30\nbob,0\n"))
-	require.NoError(t, err)
-	require.Len(t, out, 2)
-
-	assert.Equal(t, "alice", out[0].Name, "tabs must be stripped from values")
-	assert.Equal(t, 30, out[0].Age)
-	assert.Equal(t, "bob", out[1].Name)
-	assert.Equal(t, 0, out[1].Age)
+func TestLoad_nonSliceOutput_returnsErrorWithoutPanic(t *testing.T) {
+	assert.NotPanics(t, func() {
+		out, err := Load[auditRow](strings.NewReader("Name,Age\nalice,30\n"))
+		assert.Zero(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "output type csv.auditRow, it must be a slice")
+	})
 }
 
 type auditTextRow struct {
-	Name string `json:"name"`
-	Note string `json:"note"`
+	Name string
+	Note string
+}
+
+func TestLoad_UTF8BOM_mapsFirstColumn(t *testing.T) {
+	in := "\ufeffName,Note\nalice,hello\n"
+
+	out, err := Load[[]auditTextRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditTextRow{{Name: "alice", Note: "hello"}}, out)
+}
+
+func TestLoad_UTF8BOMOnly_returnsMissingHeaderError(t *testing.T) {
+	out, err := Load[[]auditTextRow](strings.NewReader("\ufeff"))
+	assert.Nil(t, out)
+	assert.EqualError(t, err, "missing CSV header row")
 }
 
 func TestLoad_quotedFields_preserveCommasAndEmbeddedNewlines(t *testing.T) {
-	in := "name,note\nalice,\"comma, then\nnew line\"\n"
+	in := "Name,Note\nalice,\"comma, then\nnew line\"\n"
 
 	out, err := Load[[]auditTextRow](strings.NewReader(in))
 	require.NoError(t, err)
@@ -105,7 +115,7 @@ func TestLoad_quotedFields_preserveCommasAndEmbeddedNewlines(t *testing.T) {
 }
 
 func TestLoad_CRLFLineEndings_leaveNoCarriageReturns(t *testing.T) {
-	in := "name,note\r\nalice,\"first\r\nsecond\"\r\nbob,plain\r\n"
+	in := "Name,Note\r\nalice,\"first\r\nsecond\"\r\nbob,plain\r\n"
 
 	out, err := Load[[]auditTextRow](strings.NewReader(in))
 	require.NoError(t, err)
@@ -115,16 +125,16 @@ func TestLoad_CRLFLineEndings_leaveNoCarriageReturns(t *testing.T) {
 	}, out)
 }
 
-func TestLoad_duplicateHeaders_laterColumnWins(t *testing.T) {
-	in := "name,name,age\nfirst,last,30\n"
+func TestLoad_literalTab_isPreserved(t *testing.T) {
+	in := "Name,Note\nalice,\"a\tb\"\n"
 
-	out, err := Load[[]auditRow](strings.NewReader(in))
+	out, err := Load[[]auditTextRow](strings.NewReader(in))
 	require.NoError(t, err)
-	require.Equal(t, []auditRow{{Name: "last", Age: 30}}, out)
+	require.Equal(t, []auditTextRow{{Name: "alice", Note: "a\tb"}}, out)
 }
 
 func TestLoad_raggedRow_returnsCSVFieldCountError(t *testing.T) {
-	out, err := Load[[]auditRow](strings.NewReader("name,age\nalice\n"))
+	out, err := Load[[]auditTextRow](strings.NewReader("Name,Note\nalice\n"))
 	assert.Nil(t, out)
 	require.EqualError(t, err, "record on line 2: wrong number of fields")
 
@@ -133,14 +143,46 @@ func TestLoad_raggedRow_returnsCSVFieldCountError(t *testing.T) {
 	assert.ErrorIs(t, parseErr.Err, csv.ErrFieldCount)
 }
 
+func TestLoad_duplicateHeaders_laterColumnWins(t *testing.T) {
+	in := "Name,Name\nfirst,last\n"
+
+	out, err := Load[[]auditTextRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditTextRow{{Name: "last"}}, out)
+}
+
+func TestLoad_unmatchedHeader_isIgnored(t *testing.T) {
+	in := "Name,Ignored\nalice,value\n"
+
+	out, err := Load[[]auditTextRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditTextRow{{Name: "alice"}}, out)
+}
+
+func TestLoad_missingHeader_leavesStructFieldZero(t *testing.T) {
+	in := "Name\nalice\n"
+
+	out, err := Load[[]auditTextRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditTextRow{{Name: "alice"}}, out)
+}
+
+func TestLoad_defaultFieldMapping_isCaseSensitive(t *testing.T) {
+	in := "name,note\nalice,hello\n"
+
+	out, err := Load[[]auditTextRow](strings.NewReader(in))
+	require.NoError(t, err)
+	require.Equal(t, []auditTextRow{{}}, out)
+}
+
 func TestLoad_readerFailure_propagatesError(t *testing.T) {
 	errRead := errors.New("reader failed mid-stream")
 	in := io.MultiReader(
-		strings.NewReader("name,age\n"),
+		strings.NewReader("Name,Note\n"),
 		errorReader{err: errRead},
 	)
 
-	out, err := Load[[]auditRow](in)
+	out, err := Load[[]auditTextRow](in)
 	assert.Nil(t, out)
 	assert.ErrorIs(t, err, errRead)
 }
@@ -154,12 +196,12 @@ func (r errorReader) Read([]byte) (int, error) {
 }
 
 func TestNew_runPropagatesCSVError(t *testing.T) {
-	csvLoader, err := New[auditRow]()
+	csvLoader, err := New[auditTextRow]()
 	require.NoError(t, err)
 
 	out, err := csvLoader.Run(
 		context.Background(),
-		strings.NewReader("name,age\nalice\n"),
+		strings.NewReader("Name,Note\nalice\n"),
 	)
 	assert.Nil(t, out)
 	assert.EqualError(
@@ -171,14 +213,14 @@ func TestNew_runPropagatesCSVError(t *testing.T) {
 
 func TestNew_invalidLoaderOption_returnsError(t *testing.T) {
 	invalidateName := func(
-		l loader.ILoader[io.Reader, []auditRow],
-	) loader.ILoader[io.Reader, []auditRow] {
-		l.(*loader.Loader[io.Reader, []auditRow]).Name = ""
+		l loader.ILoader[io.Reader, []auditTextRow],
+	) loader.ILoader[io.Reader, []auditTextRow] {
+		l.(*loader.Loader[io.Reader, []auditTextRow]).Name = ""
 
 		return l
 	}
 
-	csvLoader, err := New[auditRow](invalidateName)
+	csvLoader, err := New[auditTextRow](invalidateName)
 	assert.Nil(t, csvLoader)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "Name")
