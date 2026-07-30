@@ -43,7 +43,7 @@ func New[In any](
 	}
 
 	switch reflect.ValueOf(s).Kind() {
-	case reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		if reflect.ValueOf(s).IsNil() {
 			return nil, customerror.NewRequiredError("storage")
 		}
