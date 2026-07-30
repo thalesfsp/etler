@@ -137,6 +137,30 @@ func TestPipeline_SetPause_togglesPausedState(t *testing.T) {
 	assert.Equal(t, status.Runnning.String(), p.GetStatus().Value())
 }
 
+// Regression: resuming only changes the status when the pipeline was paused.
+// A redundant resume after completion must preserve the terminal status.
+func TestPipeline_SetPause_resumePreservesTerminalStatus(t *testing.T) {
+	p, err := New("pause-terminal-audit", "terminal status survives resume", false,
+		newIdentityStage(t, "stage-pause-terminal-audit"),
+	)
+	require.NoError(t, err)
+
+	p.SetPause(true)
+	require.Equal(t, status.Paused.String(), p.GetStatus().Value())
+
+	p.SetPause(false)
+	require.Equal(t, status.Runnning.String(), p.GetStatus().Value(),
+		"a paused pipeline must report running after it is resumed")
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.NoError(t, err)
+	require.Equal(t, status.Done.String(), p.GetStatus().Value())
+
+	p.SetPause(false)
+	assert.Equal(t, status.Done.String(), p.GetStatus().Value(),
+		"resuming an unpaused completed pipeline must preserve its terminal status")
+}
+
 // E2E: pausing the pipeline must actually hold processors back until resumed.
 func TestPipeline_pause_holdsProcessing_untilResumed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -273,6 +297,62 @@ func TestPipeline_reuse_progressDoesNotExceed100Percent(t *testing.T) {
 	assert.Equal(t, int64(1), p.GetProgress().Value(),
 		"progress must be relative to the current run")
 	assert.Equal(t, "100%", p.GetProgressPercent().Value())
+}
+
+// Regression: every run replaces the duration metric, including failed runs.
+func TestPipeline_failedRun_replacesPreviousDuration(t *testing.T) {
+	boom := errors.New("boom-pipeline-duration-audit")
+
+	runs := 0
+
+	slowThenFail, err := processor.New(
+		"slow-then-fail-pipeline-duration-audit",
+		"succeeds slowly, then fails fast",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			runs++
+
+			if runs == 1 {
+				time.Sleep(200 * time.Millisecond)
+
+				return processingData, nil
+			}
+
+			return nil, boom
+		},
+	)
+	require.NoError(t, err)
+
+	stg, err := stage.New(
+		"stage-pipeline-duration-audit",
+		"duration stage",
+		converter.MustDefault(
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+		),
+		slowThenFail,
+	)
+	require.NoError(t, err)
+
+	p, err := New(
+		"pipeline-duration-audit",
+		"failed run replaces duration",
+		false,
+		stg,
+	)
+	require.NoError(t, err)
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.NoError(t, err)
+
+	successfulDuration := p.GetDuration().Value()
+	require.Positive(t, successfulDuration)
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.ErrorIs(t, err, boom)
+
+	assert.Less(t, p.GetDuration().Value(), successfulDuration,
+		"the failed pipeline run must replace the previous successful duration")
 }
 
 // Concurrency: two pipelines running at the same time must not interfere with
