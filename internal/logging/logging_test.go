@@ -10,6 +10,7 @@ import (
 	"github.com/thalesfsp/sypl/v2/fields"
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/sypl/v2/output"
+	"github.com/thalesfsp/sypl/v2/shared"
 	"go.elastic.co/apm"
 )
 
@@ -105,4 +106,30 @@ func TestToAPM_withTransactionAndSpan(t *testing.T) {
 	assert.Contains(t, f, "trace.id")
 	assert.Contains(t, f, "transaction.id")
 	assert.Contains(t, f, "span.id")
+}
+
+// SYPL_LEVEL and SYPL_FILTER raise the effective level at runtime, and sypl
+// honours them only on its slow path. Gating on the outputs' configured max
+// level alone would silently defeat them, so Admits must defer.
+func TestAdmits_deferToSyplWhenEnvRaisesLevel(t *testing.T) {
+	l := sypl.NewDefault("admits-env", level.Error)
+
+	// Baseline: with no env var set, a debug call cannot reach an
+	// error-level output.
+	assert.False(t, Admits(l, level.Debug))
+
+	for _, envVar := range []string{shared.LevelEnvVar, shared.FilterEnvVar} {
+		t.Run(envVar, func(t *testing.T) {
+			t.Setenv(envVar, "trace")
+
+			assert.True(t, Admits(l, level.Debug),
+				"%s can raise the level at runtime, so the payload must still be built", envVar)
+		})
+	}
+}
+
+// Fatal always runs the full pipeline because it exits the process, so it must
+// never be gated out regardless of the outputs' levels.
+func TestAdmits_neverGatesFatal(t *testing.T) {
+	assert.True(t, Admits(sypl.NewDefault("admits-fatal", level.None), level.Fatal))
 }

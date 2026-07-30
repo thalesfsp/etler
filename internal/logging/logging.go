@@ -2,12 +2,14 @@ package logging
 
 import (
 	"context"
+	"os"
 	"sync"
 
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/fields"
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/sypl/v2/processor"
+	"github.com/thalesfsp/sypl/v2/shared"
 	"github.com/thalesfsp/sypl/v2/status"
 	"go.elastic.co/apm"
 )
@@ -31,10 +33,30 @@ type Logger struct {
 // Exported functionalities.
 //////
 
-// Admits reports whether any enabled logger output admits lvl.
+// Admits reports whether a log call at `lvl` can actually reach an output, so
+// callers can skip building a payload that would be discarded.
+//
+// It mirrors sypl's own fast-gate rule (`(*Sypl).fastGated`) so gating here can
+// never suppress a message sypl would have emitted:
+//
+//   - `SYPL_LEVEL` and `SYPL_FILTER` raise levels and filter by component at
+//     runtime, so when either is set this defers to sypl and admits everything.
+//   - `Fatal` always runs the full pipeline — it exits the process.
+//   - Otherwise a call is admitted when any ENABLED output's max level covers
+//     it. Levels are read live, so reconfiguration is observed immediately.
 func Admits(l sypl.ISypl, lvl level.Level) bool {
 	if l == nil || lvl == level.None {
 		return false
+	}
+
+	// Both env vars can raise the effective level at runtime. sypl honours them
+	// on its slow path only, so gating here would silently defeat them.
+	if os.Getenv(shared.LevelEnvVar) != "" || os.Getenv(shared.FilterEnvVar) != "" {
+		return true
+	}
+
+	if lvl == level.Fatal {
+		return true
 	}
 
 	for _, o := range l.GetOutputs() {
