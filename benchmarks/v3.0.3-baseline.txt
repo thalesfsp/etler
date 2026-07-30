@@ -1,0 +1,22 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/thalesfsp/etler/v3
+cpu: Apple M4 Pro
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	   1087275 ns/op	  821154 B/op	   18859 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	   1078810 ns/op	  821304 B/op	   18859 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	   1088478 ns/op	  824375 B/op	   18860 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	  10375818 ns/op	15702850 B/op	  271375 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   9667160 ns/op	15662408 B/op	  271350 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   9632860 ns/op	15660868 B/op	  271010 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	    143546 ns/op	   69494 B/op	     762 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	    145290 ns/op	   68663 B/op	     761 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	    147071 ns/op	   69470 B/op	     762 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	  19035715 ns/op	31488866 B/op	  542178 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	  19021275 ns/op	31490648 B/op	  542525 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	  20720896 ns/op	31490927 B/op	  542209 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	     74712 ns/op	   45009 B/op	     236 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	     68875 ns/op	   45020 B/op	     236 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	     71569 ns/op	   45029 B/op	     236 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	     59581 ns/op	   36745 B/op	     235 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	     55185 ns/op	   36721 B/op	     235 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	     58520 ns/op	   35883 B/op	     235 allocs/op

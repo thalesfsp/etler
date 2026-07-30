@@ -23,11 +23,11 @@ ETL pipelines enable organizations to:
 
 - Powerful Data Transformations:Transformations can be easily combined and chained together within stages to create complex data processing logic. The framework also allows developers to implement custom processors and converters using Go functions, providing unlimited flexibility in data manipulation.
 
-- Efficient Data Loading: Loaders allows to efficiently load data from various sources, including files, databases, APIs, and message queues. Loaders are designed to handle different data formats and protocols, making it easy to integrate with diverse data sources. The framework also supports parallel data loading and provides options for controlling concurrency, enabling high-performance data extraction and loading.
+- Efficient Data Loading: Loaders allows to efficiently load data from various sources, including files, databases, APIs, and message queues. Loaders are designed to handle different data formats and protocols, making it easy to integrate with diverse data sources.
 
 - Comprehensive Observability: ETLer prioritizes observability and provides built-in features for monitoring, logging, and tracing pipeline execution. The framework exposes pipeline/stage/processor metrics using Golang's built-in, battle-tested `expvar` package (global registration is opt-in via `ETLER_METRICS_PUBLISH=true`), allowing easy integration with monitoring systems. Structured logging is powered by the `sypl` package, providing rich context and consistent log levels across the pipeline. Distributed tracing is supported through the `customapm` package which is powered under-the-hood by Elastic APM, enabling deep insights into pipeline performance and behavior.
 
-- Error Handling and Resilience: ETLer includes robust error handling mechanisms to ensure pipeline resilience and fault tolerance. Errors that occur during pipeline execution are propagated and handled gracefully, with detailed error messages and proper error reporting. The framework also provides options for configuring retry policies, allowing automatic retries of failed operations with customizable backoff strategies.
+- Error Handling and Resilience: ETLer includes robust error handling mechanisms to ensure pipeline resilience and fault tolerance. Errors that occur during pipeline execution are propagated and handled gracefully, with detailed error messages and proper error reporting. Storage writes derive a stable id from each item, so a retry does not create a second record on a backend whose `Create` upserts.
 
 - Testing and Documentation: ETLer emphasizes the importance of testing and documentation. The framework includes a comprehensive suite of unit tests to ensure the reliability and correctness of pipeline components. The codebase is documented, with comments explaining the purpose and functionality of components facilitating adoption, and enable developers to effectively leverage the framework.
 
@@ -45,23 +45,56 @@ A pipeline is made of stages; each stage runs its processors in order, then
 converts every item.
 
 ```go
-process, _ := processor.New("double", "doubles each value",
-    func(_ context.Context, in []int) ([]int, error) {
-        out := make([]int, len(in))
-        for i, v := range in {
-            out[i] = v * 2
-        }
-        return out, nil
-    })
+package main
 
-convert, _ := passthru.New[int]()
+import (
+	"context"
+	"fmt"
+	"log"
 
-stg, _ := stage.New("stage-1", "doubles", convert, process)
+	"github.com/thalesfsp/etler/v4/converters/passthru"
+	"github.com/thalesfsp/etler/v4/pipeline"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/stage"
+)
 
-p, _ := pipeline.New("my-pipeline", "doubles every value", false, stg)
+func main() {
+	double, err := processor.New("double", "doubles each value",
+		func(_ context.Context, in []int) ([]int, error) {
+			out := make([]int, len(in))
+			for i, v := range in {
+				out[i] = v * 2
+			}
 
-tasks, err := p.Run(context.Background(), []int{1, 2, 3})
-// tasks[len(tasks)-1].ProcessingData == []int{2, 4, 6}
+			return out, nil
+		})
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	convert, err := passthru.New[int]()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	stg, err := stage.New("stage-1", "doubles", convert, double)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	p, err := pipeline.New("my-pipeline", "doubles every value", false, stg)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	tasks, err := p.Run(context.Background(), []int{1, 2, 3})
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	fmt.Println(tasks[len(tasks)-1].ProcessingData)
+	// Output: [2 4 6]
+}
 ```
 
 Every package ships runnable examples — see them on
@@ -79,11 +112,14 @@ Three rules the design relies on:
   processors receive only a shallow copy.
 - **A single `Pipeline` or `Stage` instance must not be `Run` concurrently with
   itself.** Each instance owns its progress, status and duration metrics.
-  Separate instances are fully independent.
+  Separate instances are independent — with one exception: under
+  `ETLER_METRICS_PUBLISH=true`, two entities of the same type sharing a name
+  deliberately share the same published `expvar`s.
 
 ## Upgrading from v3
 
-The import path changes to `github.com/thalesfsp/etler/v4`. Beyond that:
+The import path changes to `github.com/thalesfsp/etler/v4`, and the module now
+requires Go 1.25. Beyond that:
 
 - `OnFinished` and `Async` are no longer exported struct fields — use the
   `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
@@ -92,8 +128,15 @@ The import path changes to `github.com/thalesfsp/etler/v4`. Beyond that:
   name) instead of `json:"..."`, matching the CSV converter. Plain `int`,
   `float64` and `bool` fields now decode correctly, so the old
   `json:"age,string"` workaround should be removed.
-- Storage writes derive a deterministic id from each item, so retrying a failed
-  write overwrites instead of duplicating.
+- The storage constructors take their own option type. Entity options that used
+  to be passed directly must now be wrapped:
+  `storage.New[Item](s, "target", storage.WithConverterOptions(opt))` — and
+  `WithProcessorOptions` for the processor equivalent.
+- Storage writes derive a **stable** id from each item instead of a fresh UUID
+  per attempt, so a retry reuses the same key. Whether that overwrites or is
+  rejected is the backend's `Create` semantics — etler guarantees the key, not
+  the upsert. Two structurally identical items therefore share an id; pass
+  `WithIDFunc` or `WithIDFieldName` if they must be distinct.
 - `processor.New("")` returns an error; a name is required.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.

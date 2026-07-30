@@ -27,7 +27,8 @@ coverage raised to ~99%.
   longer appears in marshalled JSON.
 - **`Stage`, `Processor`, `Converter` and `Loader` gained unexported fields**
   (the mutexes above), so unkeyed composite literals of those structs no longer
-  compile. Use the factories, as before.
+  compile. Use the factories, as before. (`Pipeline` gained one too, but already
+  had an unexported field, so unkeyed literals of it were never possible.)
 - **The CSV loader now decodes directly into the target type** with
   [gocsv](https://github.com/gocarina/gocsv) — the same library the CSV
   *converter* already used for writing. Reading and writing are therefore
@@ -36,10 +37,14 @@ coverage raised to ~99%.
   `json:"age,string"` workaround is no longer needed. The loader also no longer
   strips tab characters from values, which previously corrupted legitimately
   quoted content such as `"a\tb"`.
-- **Storage writes now use a deterministic id** derived from the item, instead
-  of a fresh UUID per attempt, so retrying after a timeout overwrites rather
-  than duplicating. Options are available to supply a custom id function or name
-  the id field.
+- **Storage writes now use a stable id** derived from the item, instead of a
+  fresh UUID per attempt, so retrying after a timeout reuses the same key rather
+  than inserting under a new one. Whether that overwrites or is rejected is the
+  backend's `Create` semantics — etler guarantees the key, not the upsert. Two
+  structurally identical items therefore share an id; `WithIDFunc` and
+  `WithIDFieldName` are available when they must be distinct. The storage
+  constructors also take their own option type now, so entity options must be
+  wrapped in `WithConverterOptions` / `WithProcessorOptions`.
 - **`processor.New("")` returns an error.** `Name` is now required, matching
   every other entity.
 
@@ -47,11 +52,17 @@ coverage raised to ~99%.
 Profiling attributed roughly 85% of all allocations to log messages that were
 built in full and then discarded by the level filter. Log payload construction
 on every run path is now gated behind the same emit rule sypl itself applies, so
-that work only happens when a message will actually be written. Span names use
+that work is skipped when the message would be discarded. The gate errs toward
+doing the work: it admits everything when `SYPL_LEVEL` or `SYPL_FILTER` is set,
+since those raise the level at runtime, and it cannot see an output processor
+that force-emits — the same limitation sypl's own opt-in fast gate documents. Span names use
 concatenation instead of `fmt.Sprintf`, and the CSV loader no longer round-trips
 its rows through a map and a JSON encode/decode pass.
 
-Measured (median of three runs):
+Measured on an Apple M4 Pro, Go 1.26.5, median of three runs of
+`go test -run '^$' -bench . -benchtime 100x -count 3 .`; the raw output is
+committed at [`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the
+`v3.0.3` baseline it is compared against.
 
 | Benchmark | Time | Memory | Allocations |
 | --- | --- | --- | --- |
