@@ -67,9 +67,8 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	// pause is this pipeline's pause controller. Pausing one pipeline does
 	// not affect any other.
 	pause *shared.PauseController
-	// pauseMu coordinates pause status and controller transitions.
-	pauseMu           sync.Mutex
-	statusBeforePause string
+	// pauseMu guards pause controller transitions.
+	pauseMu sync.Mutex
 }
 
 //////
@@ -111,29 +110,18 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterDone() *expvar.Int {
 	return p.CounterDone
 }
 
-// GetStatus returns the `Status` metric.
+// GetStatus returns the run's lifecycle status. Pause state is independent and
+// is reported by GetPaused; GetStatus never returns paused.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetStatus() *expvar.String {
 	return p.Status
 }
 
-// setStatus coordinates lifecycle status transitions with this pipeline's
-// pause controller.
+// setStatus publishes a run lifecycle transition immediately.
 func (p *Pipeline[ProcessedData, ConvertedOut]) setStatus(next status.Status) {
-	p.pauseMu.Lock()
-	defer p.pauseMu.Unlock()
-
-	if p.pause.Paused() {
-		p.statusBeforePause = next.String()
-		p.GetStatus().Set(status.Paused.String())
-
-		return
-	}
-
 	p.GetStatus().Set(next.String())
 }
 
-// onError updates pipeline failure observability while preserving the visible
-// paused status.
+// onError updates pipeline failure observability.
 func (p *Pipeline[ProcessedData, ConvertedOut]) onError(
 	tracedContext context.Context,
 	err error,
@@ -153,7 +141,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) onError(
 	)
 }
 
-// GetPaused returns the Paused status of THIS pipeline.
+// GetPaused returns this pipeline controller's pause state. It is the only
+// source of pause state; lifecycle status is reported separately by GetStatus.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	p.pauseMu.Lock()
 	defer p.pauseMu.Unlock()
@@ -165,7 +154,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	return status.Runnning
 }
 
-// SetPause sets the Paused status of THIS pipeline. Its processors pause
+// SetPause changes only this pipeline controller's pause state. It never
+// changes the run lifecycle status reported by GetStatus. Processors pause
 // before their next execution and resume immediately on unpause.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	p.pauseMu.Lock()
@@ -176,26 +166,12 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 			return
 		}
 
-		p.statusBeforePause = p.GetStatus().Value()
-		p.GetStatus().Set(status.Paused.String())
-
 		p.pause.Pause()
 
 		return
 	}
 
 	if p.pause.Paused() {
-		if p.GetStatus().Value() == status.Paused.String() {
-			// Updates the pipeline's status.
-			switch p.statusBeforePause {
-			case status.Done.String(), status.Failed.String():
-				p.GetStatus().Set(p.statusBeforePause)
-			default:
-				p.GetStatus().Set(status.Runnning.String())
-			}
-		}
-
-		p.statusBeforePause = ""
 		p.pause.Resume()
 	}
 }
@@ -352,8 +328,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		)
 	}
 
-	// A paused pipeline keeps reporting paused — its processors are about to
-	// block on the pause controller.
+	// Publish the run lifecycle transition even if its controller is paused.
 	p.setStatus(status.Runnning)
 
 	if logging.Admits(p.GetLogger(), level.Trace) {

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thalesfsp/etler/v4/internal/shared"
+	processorstorage "github.com/thalesfsp/etler/v4/processors/storage"
 	"github.com/thalesfsp/status"
 )
 
@@ -149,6 +150,34 @@ func TestNew_nilCustomIDFuncReturnsRequiredArgumentError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom id function is nil")
 	assert.Empty(t, stub.createdIDs())
+}
+
+func TestNew_blankTargetMatchesProcessorError(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "empty"},
+		{name: "whitespace-only", target: " \t"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			converter, converterErr := New[v4NoID](&stubStorage{}, test.target)
+			processor, processorErr := processorstorage.New[v4NoID](
+				&stubStorage{},
+				1,
+				"prefix-",
+				processorstorage.WithTarget[v4NoID](test.target),
+			)
+
+			assert.Nil(t, converter)
+			require.Error(t, converterErr)
+			assert.Nil(t, processor)
+			require.Error(t, processorErr)
+			assert.Equal(t, processorErr.Error(), converterErr.Error())
+		})
+	}
 }
 
 func TestStorage_customIDFuncErrorPropagatesWithoutWriting(t *testing.T) {

@@ -123,6 +123,13 @@ func New[In any](
 		}
 	}
 
+	if strings.TrimSpace(target) == "" {
+		return nil, customerror.NewRequiredError(
+			"storage target",
+			customerror.WithMessage("storage target must not be empty"),
+		)
+	}
+
 	cfg := config[In]{}
 
 	// Apply options before building the transform so it captures the resolved
