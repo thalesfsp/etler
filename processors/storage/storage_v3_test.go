@@ -36,6 +36,36 @@ func (s *stubStorage) Create(ctx context.Context, id, target string, v any, prm 
 	return id, nil
 }
 
+// Missing storage is rejected during construction, including an interface
+// containing a typed nil pointer.
+func TestNew_nilStorage(t *testing.T) {
+	tests := []struct {
+		name    string
+		storage storage.IStorage
+	}{
+		{name: "nil interface"},
+		{name: "typed nil", storage: (*stubStorage)(nil)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var constructorErr error
+
+			require.NotPanics(t, func() {
+				s, err := New[v3Item](test.storage, 1, "v3-test-")
+				constructorErr = err
+
+				// Exercise the pre-fix construction result to prove that an
+				// accepted nil storage would panic on first use.
+				if err == nil {
+					_, _ = s.Run(context.Background(), []v3Item{{Name: "a"}})
+				}
+			})
+			require.Error(t, constructorErr)
+		})
+	}
+}
+
 // Must + concurrency < 1 (clamped to 1): the processor persists all items and
 // passes the data through unchanged.
 func TestMust_clampedConcurrency_happyPath(t *testing.T) {
