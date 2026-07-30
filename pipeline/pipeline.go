@@ -25,31 +25,31 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies pipeline entities.
 const Type = "pipeline"
 
-// Pipeline definition.
+// Pipeline runs a configured sequence of stages and records lifecycle metrics.
 type Pipeline[ProcessedData any, ConvertedOut any] struct {
-	// Concurrent determines whether the stage should be run concurrently.
+	// ConcurrentStage determines whether all stages receive the original task
+	// concurrently or each stage receives the preceding stage's output.
 	ConcurrentStage bool `json:"concurrentStage"`
 
-	// Logger is the internal logger.
+	// Logger records pipeline lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Description of the processor.
+	// Description describes the pipeline.
 	Description string `json:"description"`
 
-	// Name of the processor.
+	// Name identifies the pipeline.
 	Name string `json:"name" validate:"required"`
 
-	// onFinished is the function that is called when a processor finishes its
-	// execution.
+	// onFinished is called after a pipeline succeeds.
 	onFinished OnFinished[ProcessedData, ConvertedOut] `json:"-"`
 
-	// Stages to be used ProcessedData the pipeline.
+	// Stages contains the stages run by the pipeline, in declaration order.
 	Stages []stage.IStage[ProcessedData, ConvertedOut] `json:"stages" validate:"required,gt=0"`
 
-	// Metrics.
+	// Lifecycle and progress metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterRunning *expvar.Int `json:"counterRunning"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
@@ -91,27 +91,29 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetName() string {
 	return p.Name
 }
 
-// GetCounterCreated returns the `CounterCreated` of the processor.
+// GetCounterCreated returns the pipeline's created counter.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterCreated() *expvar.Int {
 	return p.CounterCreated
 }
 
-// GetCounterRunning returns the `CounterRunning` of the processor.
+// GetCounterRunning returns the pipeline's running counter.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterRunning() *expvar.Int {
 	return p.CounterRunning
 }
 
-// GetCounterFailed returns the `CounterFailed` of the processor.
+// GetCounterFailed returns the pipeline's failed counter.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterFailed() *expvar.Int {
 	return p.CounterFailed
 }
 
-// GetCounterDone returns the `CounterDone` of the processor.
+// GetCounterDone returns the pipeline's done counter.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetCounterDone() *expvar.Int {
 	return p.CounterDone
 }
 
-// GetStatus returns the `Status` metric.
+// GetStatus returns the pipeline's visible lifecycle status. It reports Paused
+// whenever GetPaused reports Paused, even if a run reaches Done or Failed while
+// paused.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetStatus() *expvar.String {
 	return p.Status
 }
@@ -153,7 +155,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) onError(
 	)
 }
 
-// GetPaused returns the Paused status of THIS pipeline.
+// GetPaused returns Paused while this pipeline's pause controller is paused and
+// Runnning otherwise. Its paused state always agrees with GetStatus.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	p.pauseMu.Lock()
 	defer p.pauseMu.Unlock()
@@ -165,8 +168,10 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetPaused() status.Status {
 	return status.Runnning
 }
 
-// SetPause sets the Paused status of THIS pipeline. Its processors pause
-// before their next execution and resume immediately on unpause.
+// SetPause pauses or resumes this pipeline. Setting the current state is a
+// no-op. Processors stop before their next execution; if a run finishes while
+// paused, Status remains Paused until resume restores Done or Failed. Otherwise
+// resume restores Runnning.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	p.pauseMu.Lock()
 	defer p.pauseMu.Unlock()
@@ -226,12 +231,12 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetCreatedAt() time.Time {
 	return p.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the pipeline's most recent run duration in milliseconds.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetDuration() *expvar.Int {
 	return p.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns a snapshot of the pipeline's lifecycle metrics as strings.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      p.GetCreatedAt().String(),
@@ -244,8 +249,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetMetrics() map[string]string {
 	}
 }
 
-// UpdateObservability updates the observability of the pipeline. `tasksOut`
-// is the per-stage results — one task per stage, in stage order.
+// UpdateObservability marks a run done, records its duration, invokes the
+// callback, and logs its metrics. tasksOut contains one result per stage in
+// stage order.
 func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 	ctx context.Context,
 	now time.Time,
@@ -284,17 +290,18 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 	}
 }
 
-// GetProgress returns the `CounterProgress` of the stage.
+// GetProgress returns the number of stages completed in the current or most
+// recent run.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetProgress() *expvar.Int {
 	return p.Progress
 }
 
-// GetProgressPercent returns the `ProgressPercent` of the stage.
+// GetProgressPercent returns the completed-stage percentage.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetProgressPercent() *expvar.String {
 	return p.ProgressPercent
 }
 
-// SetProgressPercent sets the `ProgressPercent` of the stage.
+// SetProgressPercent recalculates the completed-stage percentage.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 	currentProgress := p.GetProgress().Value()
 
@@ -310,8 +317,10 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 	p.GetProgressPercent().Set(fmt.Sprintf("%d%%", int(percentage)))
 }
 
-// Run the pipeline. A pipeline instance must not run concurrently with itself;
-// separate instances run independently.
+// Run executes the pipeline. Sequential mode feeds each stage's full task into
+// the next; concurrent mode gives every stage the original task. Both modes
+// return one task per stage in stage order. A pipeline instance must not run
+// concurrently with itself; separate instances run independently.
 func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processingData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -471,7 +480,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 // Factory.
 //////
 
-// New returns a new pipeline.
+// New creates a pipeline with at least one stage. concurrentStage selects
+// whether stages receive the original task concurrently or run as a chain.
 func New[ProcessedData, ConvertedOut any](
 	name string,
 	description string,

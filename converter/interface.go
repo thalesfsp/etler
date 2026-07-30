@@ -6,7 +6,9 @@ import (
 	"github.com/thalesfsp/etler/v4/internal/shared"
 )
 
-// IConverter defines what a `Conveter` must do.
+// IConverter defines converter lifecycle, metrics, and execution.
+// Implementations must be safe for concurrent use because stages call Run from
+// multiple goroutines.
 type IConverter[In, Out any] interface {
 	shared.IMeta
 
@@ -18,6 +20,6 @@ type IConverter[In, Out any] interface {
 	// SetOnFinished sets the `OnFinished` function.
 	SetOnFinished(onFinished OnFinished[In, Out])
 
-	// Run the stage function.
+	// Run converts one input value.
 	Run(ctx context.Context, in In) (Out, error)
 }

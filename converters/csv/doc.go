@@ -1,3 +1,2 @@
-// Package csv contains the CSV converter which allows to concurrently
-// store the processed data into a CSV file.
+// Package csv converts slices of values into CSV text.
 package csv

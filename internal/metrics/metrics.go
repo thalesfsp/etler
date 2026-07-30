@@ -13,11 +13,12 @@ const (
 	// DefaultMetricCounterLabel is the default label for a counter metric.
 	DefaultMetricCounterLabel = "counter"
 
-	// Name of the package/application.
+	// Name is the prefix used for etler metric names.
 	Name = "etler"
 
-	// PublishEnvVar, when set to "true", publishes metrics to the global
-	// expvar registry under their pattern name (visible on /debug/vars).
+	// PublishEnvVar names the environment variable that, when set to "true",
+	// publishes metrics to the global expvar registry under their pattern name
+	// (visible on /debug/vars).
 	//
 	// Publishing is opt-in because the expvar registry can never be
 	// unregistered from: applications that create many short-lived
@@ -36,9 +37,9 @@ func shouldPublish() bool {
 	return os.Getenv(PublishEnvVar) == "true"
 }
 
-// NewString creates and initializes a new string metric. Unless publishing
-// is enabled (see PublishEnvVar), the metric is NOT registered globally.
-// A reused published metric is returned as-is — never re-initialized.
+// NewString returns a string metric initialized to Created. Unless publishing
+// is enabled through PublishEnvVar, it is not registered globally. A reused
+// published metric is returned without resetting its value.
 func NewString(name string) *expvar.String {
 	if !shouldPublish() {
 		v := new(expvar.String)
@@ -63,10 +64,8 @@ func NewString(name string) *expvar.String {
 	return v
 }
 
-// NewStringWithPattern creates and initializes a new expvar.String with a
-// consistent naming pattern where `t` is the type of the entity, `subject` is
-// the subject of the metric, `status` is the status of the metric - usually
-// from the `status` package.
+// NewStringWithPattern returns a string metric named
+// "etler.<t>.<subject>.<status>".
 func NewStringWithPattern(t, subject string, status status.Status) *expvar.String {
 	return NewString(
 		fmt.Sprintf(
@@ -79,9 +78,9 @@ func NewStringWithPattern(t, subject string, status status.Status) *expvar.Strin
 	)
 }
 
-// NewInt creates and initializes a new int metric. Unless publishing is
-// enabled (see PublishEnvVar), the metric is NOT registered globally.
-// A reused published metric is returned as-is — never re-initialized.
+// NewInt returns a zero-valued integer metric. Unless publishing is enabled
+// through PublishEnvVar, it is not registered globally. A reused published
+// metric is returned without resetting its value.
 func NewInt(name string) *expvar.Int {
 	if !shouldPublish() {
 		return new(expvar.Int)
@@ -98,10 +97,8 @@ func NewInt(name string) *expvar.Int {
 	return expvar.NewInt(name)
 }
 
-// NewIntWithPattern creates and initializes a new expvar.Int with a consistent
-// naming pattern where `t` is the type of the entity, `subject` is the subject
-// of the metric, `status` is the status of the metric - usually from the
-// `status` package.
+// NewIntWithPattern returns an integer metric named
+// "etler.<t>.<subject>.<status>.counter".
 func NewIntWithPattern(t, subject string, status status.Status) *expvar.Int {
 	return NewInt(
 		fmt.Sprintf(

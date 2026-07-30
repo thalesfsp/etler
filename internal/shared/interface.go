@@ -7,44 +7,44 @@ import (
 	"github.com/thalesfsp/sypl/v2"
 )
 
-// IMeta defines what an `Entity` must do.
+// IMeta exposes an entity's identifying metadata and logger.
 type IMeta interface {
-	// GetName returns the `Name` of the entity.
+	// GetName returns the entity's name.
 	GetName() string
 
-	// GetLogger returns the `Logger` of the entity.
+	// GetLogger returns the entity's logger.
 	GetLogger() sypl.ISypl
 
-	// GetDescription returns the `Description` of the processor.
+	// GetDescription returns the entity's description.
 	GetDescription() string
 
 	// GetType returns the entity type.
 	GetType() string
 }
 
-// IMetrics defines how to interact with the metrics.
+// IMetrics exposes an entity's lifecycle metrics.
 type IMetrics interface {
-	// GetCounterCreated returns the `CounterCreated` metric.
+	// GetCounterCreated returns the created counter.
 	GetCounterCreated() *expvar.Int
 
-	// GetCounterRunning returns the `CounterRunning` metric.
+	// GetCounterRunning returns the running counter.
 	GetCounterRunning() *expvar.Int
 
-	// GetCounterFailed returns the `CounterFailed` metric.
+	// GetCounterFailed returns the failed counter.
 	GetCounterFailed() *expvar.Int
 
-	// GetCounterDone returns the `CounterDone` metric.
+	// GetCounterDone returns the done counter.
 	GetCounterDone() *expvar.Int
 
-	// GetStatus returns the `Status` metric.
+	// GetStatus returns the lifecycle status.
 	GetStatus() *expvar.String
 
-	// GetCreatedAt returns the created at time.
+	// GetCreatedAt returns when the entity was constructed.
 	GetCreatedAt() time.Time
 
-	// GetDuration returns the `CounterDuration` of the stage.
+	// GetDuration returns the most recent operation duration.
 	GetDuration() *expvar.Int
 
-	// GetMetrics returns the stage's metrics.
+	// GetMetrics returns selected metrics as strings.
 	GetMetrics() map[string]string
 }

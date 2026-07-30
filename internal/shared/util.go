@@ -17,19 +17,20 @@ import (
 	"github.com/thalesfsp/sypl/v2"
 )
 
-// GenerateIDBasedOnContent generates a SHA-256 hash (content-based) for message
-// ID. Good to be used to avoid duplicated messages.
+// GenerateIDBasedOnContent returns the lowercase SHA-256 hex digest of ct after
+// trimming leading and trailing form feeds, tabs, carriage returns, newlines,
+// and spaces. Equal normalized content produces the same ID.
 func GenerateIDBasedOnContent(ct string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Trim(ct, "\f\t\r\n "))))
 }
 
-// GenerateUUID generates a RFC4122 UUID and DCE 1.1: Authentication and
-// Security Services.
+// GenerateUUID returns a random RFC 4122 UUID string.
 func GenerateUUID() string {
 	return uuid.New().String()
 }
 
-// Flatten2D takes a 2D slice and returns a 1D slice containing all the elements.
+// Flatten2D concatenates the inner slices in order. It returns nil when data
+// contains no elements.
 func Flatten2D[T any](data [][]T) []T {
 	total := 0
 	for _, outer := range data {
@@ -48,14 +49,14 @@ func Flatten2D[T any](data [][]T) []T {
 	return result
 }
 
-// ExtractID extracts `idFieldName` from `v` - an arbitrary struct. When no
-// field name is configured, it searches for ID or Id.
+// ExtractID returns an ID from an exported field of t. It matches idFieldName
+// case-insensitively when provided; otherwise it matches ID case-insensitively.
+// Top-level fields take precedence over fields in exported anonymous structs.
 //
-// NOTE: Only exported fields are considered.
-// NOTE: Supported ID values are string, int, int8, int16, int32, int64, uint,
-// uint8, uint16, uint32, and uint64. Pointer and interface wrappers are
-// dereferenced first. Nil pointers, whitespace-only strings, uintptr, and all
-// other kinds are treated as absent.
+// NOTE: String, int, int8, int16, int32, int64, uint, uint8, uint16, uint32,
+// and uint64 values are supported after pointer and interface dereferencing.
+// Nil pointers, whitespace-only strings, uintptr, fmt.Stringer-only values, and
+// all other kinds are treated as absent.
 func ExtractID[T any](t T, idFieldName string) string {
 	return extractID(reflect.ValueOf(t), idFieldName, make(map[extractIDPointer]struct{}))
 }
@@ -160,7 +161,7 @@ func nonEmptyID(id string) string {
 	return id
 }
 
-// Unmarshal with custom error.
+// Unmarshal decodes JSON data into v and wraps decoding errors.
 func Unmarshal(data []byte, v any) error {
 	if err := json.Unmarshal(data, v); err != nil {
 		return customerror.NewFailedToError("to unmarshal",
@@ -171,7 +172,7 @@ func Unmarshal(data []byte, v any) error {
 	return nil
 }
 
-// Marshal with custom error.
+// Marshal encodes v as JSON and wraps encoding errors.
 func Marshal(v any) ([]byte, error) {
 	data, err := json.Marshal(&v)
 	if err != nil {
@@ -183,7 +184,7 @@ func Marshal(v any) ([]byte, error) {
 	return data, nil
 }
 
-// Decode process stream `r` into `v` and returns an error if any.
+// Decode reads one JSON value from r into v and wraps decoding errors.
 func Decode(r io.Reader, v any) error {
 	if err := json.NewDecoder(r).Decode(v); err != nil {
 		return customerror.NewFailedToError("decode",
@@ -194,7 +195,7 @@ func Decode(r io.Reader, v any) error {
 	return nil
 }
 
-// Encode process `v` into stream `w` and returns an error if any.
+// Encode writes v as JSON followed by a newline and wraps encoding errors.
 func Encode(w io.Writer, v any) error {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		return customerror.NewFailedToError("encode",
@@ -205,7 +206,7 @@ func Encode(w io.Writer, v any) error {
 	return nil
 }
 
-// ReadAll reads all the data from `r` and returns an error if any.
+// ReadAll reads r to EOF and wraps read errors.
 func ReadAll(r io.Reader) ([]byte, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -215,8 +216,8 @@ func ReadAll(r io.Reader) ([]byte, error) {
 	return b, nil
 }
 
-// OnErrorHandler deals with observability (update status, logging, metrics)
-// when an processor, or stage, or the pipeline error.
+// OnErrorHandler marks an entity failed, records and logs err, and returns the
+// wrapped error.
 func OnErrorHandler(
 	tracedContext context.Context,
 	iMetric IMetrics,

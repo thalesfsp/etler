@@ -25,7 +25,8 @@ type PauseController struct {
 // Methods.
 //////
 
-// Pause pauses. Safe for concurrent use. Idempotent.
+// Pause changes the controller to paused. It is concurrency-safe and
+// idempotent.
 func (pc *PauseController) Pause() {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
@@ -36,8 +37,8 @@ func (pc *PauseController) Pause() {
 	}
 }
 
-// Resume resumes, waking up all `Wait`ers. Safe for concurrent use.
-// Idempotent.
+// Resume changes the controller to running and wakes all Wait callers. It is
+// concurrency-safe and idempotent.
 func (pc *PauseController) Resume() {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
@@ -49,7 +50,7 @@ func (pc *PauseController) Resume() {
 	}
 }
 
-// Paused returns whether the controller is currently paused.
+// Paused reports whether the controller is currently paused.
 func (pc *PauseController) Paused() bool {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
@@ -57,8 +58,8 @@ func (pc *PauseController) Paused() bool {
 	return pc.paused
 }
 
-// Wait blocks while paused. It returns nil as soon as the controller is
-// resumed, or the context error if the context is done first.
+// Wait blocks while the controller is paused. It returns nil after a resume or
+// the context error if ctx ends first.
 func (pc *PauseController) Wait(ctx context.Context) error {
 	for {
 		pc.mu.Lock()
@@ -85,19 +86,17 @@ func (pc *PauseController) Wait(ctx context.Context) error {
 // Factory and context plumbing.
 //////
 
-// NewPauseController returns a new, running (not paused) controller.
+// NewPauseController returns a controller in the running state.
 func NewPauseController() *PauseController {
 	return &PauseController{}
 }
 
-// ContextWithPause returns a copy of `ctx` carrying `pc`. The pipeline uses
-// this to make its controller visible to the processors it runs.
+// ContextWithPause returns a copy of ctx carrying pc.
 func ContextWithPause(ctx context.Context, pc *PauseController) context.Context {
 	return context.WithValue(ctx, pauseCtxKey{}, pc)
 }
 
-// PauseFromCtx extracts the `PauseController` from `ctx`, or nil if none —
-// e.g., a processor running standalone, outside a pipeline.
+// PauseFromCtx returns the PauseController carried by ctx, or nil when absent.
 func PauseFromCtx(ctx context.Context) *PauseController {
 	pc, _ := ctx.Value(pauseCtxKey{}).(*PauseController)
 

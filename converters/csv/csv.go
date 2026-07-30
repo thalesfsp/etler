@@ -13,11 +13,12 @@ import (
 // Consts, vars and types.
 //////
 
-// Name of the converter.
+// Name identifies the CSV converter.
 const Name = "csv"
 
-// CSV definition.
+// CSV converts its input into CSV text.
 type CSV[In any] struct {
+	// IConverter provides the converter lifecycle and execution API.
 	converter.IConverter[In, string] `json:"converter" validate:"required"`
 }
 
@@ -25,7 +26,8 @@ type CSV[In any] struct {
 // Factory.
 //////
 
-// New creates a new converter.
+// New creates a converter from []In to CSV text. Options are applied and
+// validated by converter.New.
 func New[In any](
 	opts ...converter.Func[[]In, string],
 ) (*CSV[[]In], error) {
@@ -63,7 +65,7 @@ func New[In any](
 	return csv, nil
 }
 
-// Must returns a new converter or panics if an error occurs.
+// Must creates a CSV converter or panics if validation fails.
 func Must[In any](
 	opts ...converter.Func[[]In, string],
 ) *CSV[[]In] {

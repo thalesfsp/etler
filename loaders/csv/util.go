@@ -46,18 +46,25 @@ type fieldInfo struct {
 // Helpers.
 //////
 
-// Load converts a CSV file to the target struct slice (Out).
+// Load decodes CSV from in into Out, which must be a slice of structs or
+// pointers to structs. A nil reader, a non-slice output, an empty input, or a
+// cyclic output type returns an error. A leading UTF-8 BOM is discarded.
+// Literal tabs in fields are preserved; encoding/csv normalizes quoted CRLF
+// sequences to LF.
 //
 // Header matching gives precedence to an exact, case-sensitive csv tag.
 // Otherwise, untagged field names match case-insensitively; if more than one
 // untagged field matches, Load returns an ambiguity error naming the header and
-// competing fields.
+// competing fields. Numeric fields are validated against their exact Go bit
+// width before decoding, so out-of-range values return an error.
 //
 // Load uses gocsv's per-unmarshaller header-renormalization hook and a local
-// encoding/csv reader. However, gocsv has no per-unmarshaller settings for its
-// TagName, TagSeparator, FieldsCombiner, FailIfDoubleHeaderNames,
-// ShouldAlignDuplicateHeadersWithStructFieldOrder, or struct-name normalizer.
-// Changes to those process-wide settings can still affect decoding.
+// encoding/csv reader and writer, so gocsv's CSV reader and writer factories
+// and FailIfUnmatchedStructTags do not affect it. Gocsv has no
+// per-unmarshaller settings for TagName, TagSeparator, FieldsCombiner,
+// FailIfDoubleHeaderNames, ShouldAlignDuplicateHeadersWithStructFieldOrder, or
+// its struct-name normalizer; changes to those process-wide settings can still
+// affect decoding.
 func Load[Out any](in io.Reader) (Out, error) {
 	outType := reflect.TypeOf((*Out)(nil)).Elem()
 	if outType.Kind() != reflect.Slice {

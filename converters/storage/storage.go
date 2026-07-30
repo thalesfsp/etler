@@ -18,15 +18,17 @@ import (
 // Consts, vars and types.
 //////
 
-// Name of the converter.
+// Name identifies the storage converter.
 const Name = "storage"
 
-// Storage definition.
+// Storage converts an item into the key returned by a storage Create call.
 type Storage[In any] struct {
+	// IConverter provides the converter lifecycle and execution API.
 	converter.IConverter[In, string] `json:"converter" validate:"required"`
 }
 
-// IDFunc derives a storage ID from an item.
+// IDFunc derives a storage ID from an item. Returning an error or a blank ID
+// aborts the write.
 type IDFunc[In any] func(ctx context.Context, in In) (string, error)
 
 type config[In any] struct {
@@ -36,15 +38,15 @@ type config[In any] struct {
 	converterOptions []converter.Func[In, string]
 }
 
-// Func allows storage converter options to be specified.
+// Func configures a storage converter.
 type Func[In any] func(c *config[In])
 
 //////
 // Options.
 //////
 
-// WithIDFunc sets the function used to derive a storage ID from an item. The
-// function may be called concurrently and must be safe for concurrent use.
+// WithIDFunc sets the first and exclusive source of storage IDs. The function
+// may be called concurrently and must be safe for concurrent use.
 func WithIDFunc[In any](idFunc IDFunc[In]) Func[In] {
 	return func(c *config[In]) {
 		c.idFunc = idFunc
@@ -52,7 +54,10 @@ func WithIDFunc[In any](idFunc IDFunc[In]) Func[In] {
 	}
 }
 
-// WithIDFieldName sets the struct field read for an item's storage ID.
+// WithIDFieldName sets the exported struct field read for an item's storage ID.
+// String, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, and
+// uint64 fields are supported after pointer and interface dereferencing;
+// fmt.Stringer is not used implicitly.
 func WithIDFieldName[In any](idFieldName string) Func[In] {
 	return func(c *config[In]) {
 		c.idFieldName = idFieldName
@@ -102,8 +107,12 @@ func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, erro
 // Factory.
 //////
 
-// New creates a new Storage converter. IDs are derived deterministically from
-// each item, making writes idempotent when callers retry the same item.
+// New creates a storage converter. For each item it resolves the ID from
+// WithIDFunc, then the configured or default ID/Id field, then a SHA-256 key
+// derived from the item's JSON. The built-in field and content paths produce a
+// stable key for stable input; a custom IDFunc determines its own stability.
+// Whether repeated writes are idempotent depends on the storage backend's
+// Create implementation.
 func New[In any](
 	s storage.IStorage,
 	target string,
@@ -177,7 +186,7 @@ func New[In any](
 	return csv, nil
 }
 
-// Must returns a new converter or panics if an error occurs.
+// Must creates a storage converter or panics if validation fails.
 func Must[In any](
 	s storage.IStorage,
 	target string,

@@ -26,32 +26,31 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies stage entities.
 const Type = "stage"
 
-// Stage definition.
+// Stage runs processors and converts the resulting items.
 type Stage[ProcessingData, ConvertedData any] struct {
-	// Description of the stage.
+	// Description describes the stage.
 	Description string `json:"description"`
 
-	// Conversor to be used tsk the stage. Its conversion function must be safe
-	// for concurrent use.
+	// Conversor converts each processed item. It must be safe for concurrent
+	// use.
 	Conversor converter.IConverter[ProcessingData, ConvertedData] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records stage lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the stage.
+	// Name identifies the stage.
 	Name string `json:"name" validate:"required"`
 
-	// onFinished is the function that is called when a processor finishes its
-	// execution.
+	// onFinished is called after a stage succeeds.
 	onFinished OnFinished[ProcessingData, ConvertedData] `json:"-"`
 
-	// Processors to be run tsk the stage.
+	// Processors contains the processors run in declaration order.
 	Processors []processor.IProcessor[ProcessingData] `json:"processors" validate:"required,gt=0"`
 
-	// Metrics.
+	// Lifecycle and progress metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterDone    *expvar.Int `json:"counterDone"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
@@ -106,17 +105,18 @@ func (s *Stage[ProcessingData, ConvertedData]) GetCounterDone() *expvar.Int {
 	return s.CounterDone
 }
 
-// GetProgress returns the `CounterProgress` of the stage.
+// GetProgress returns the number of processors completed in the current or
+// most recent run.
 func (s *Stage[ProcessingData, ConvertedData]) GetProgress() *expvar.Int {
 	return s.Progress
 }
 
-// GetProgressPercent returns the `ProgressPercent` of the stage.
+// GetProgressPercent returns the completed-processor percentage.
 func (s *Stage[ProcessingData, ConvertedData]) GetProgressPercent() *expvar.String {
 	return s.ProgressPercent
 }
 
-// SetProgressPercent sets the `ProgressPercent` of the stage.
+// SetProgressPercent recalculates the completed-processor percentage.
 func (s *Stage[ProcessingData, ConvertedData]) SetProgressPercent() {
 	currentProgress := s.GetProgress().Value()
 
@@ -163,12 +163,12 @@ func (s *Stage[ProcessingData, ConvertedData]) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the most recent run duration in milliseconds.
 func (s *Stage[ProcessingData, ConvertedData]) GetDuration() *expvar.Int {
 	return s.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns a snapshot of the stage's metrics as strings.
 func (s *Stage[ProcessingData, ConvertedData]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":       s.GetCreatedAt().String(),
@@ -183,8 +183,11 @@ func (s *Stage[ProcessingData, ConvertedData]) GetMetrics() map[string]string {
 	}
 }
 
-// Run the transform function. A stage instance must not run concurrently with
-// itself; separate instances run independently.
+// Run visits processors in declaration order, feeds each synchronous output
+// into the next processor, converts the resulting items concurrently, and
+// returns the updated task. Async processor outputs are not forwarded, but Run
+// waits for them and returns their errors. A stage instance must not run
+// concurrently with itself; separate instances run independently.
 func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task.Task[ProcessingData, ConvertedData]) (task.Task[ProcessingData, ConvertedData], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -417,8 +420,10 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 // Factory.
 //////
 
-// New returns a new stage. The conversor must be safe for concurrent use
-// because Run converts items concurrently.
+// New creates a stage with a non-nil converter and at least one processor. The
+// converter must be safe for concurrent use because Run converts items
+// concurrently. Processors must not mutate their input slice or pointed-to
+// values.
 func New[ProcessingData, ConvertedData any](
 	name string,
 	description string,
