@@ -2,11 +2,12 @@ package shared
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -16,10 +17,10 @@ import (
 	"github.com/thalesfsp/sypl/v2"
 )
 
-// GenerateIDBasedOnContent generates a SHA-1 hash (content-based) for message
+// GenerateIDBasedOnContent generates a SHA-256 hash (content-based) for message
 // ID. Good to be used to avoid duplicated messages.
 func GenerateIDBasedOnContent(ct string) string {
-	return fmt.Sprintf("%x", sha1.Sum([]byte(strings.Trim(ct, "\f\t\r\n "))))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Trim(ct, "\f\t\r\n "))))
 }
 
 // GenerateUUID generates a RFC4122 UUID and DCE 1.1: Authentication and
@@ -47,9 +48,14 @@ func Flatten2D[T any](data [][]T) []T {
 	return result
 }
 
-// ExtractID extracts `possibleIDFieldNames` from `v` - an arbitrary struct.
+// ExtractID extracts `idFieldName` from `v` - an arbitrary struct. When no
+// field name is configured, it searches for ID or Id.
 //
 // NOTE: Only exported fields are considered.
+// NOTE: Supported ID values are strings, signed integers, unsigned integers
+// except uintptr, and fmt.Stringer implementations. Pointer and interface
+// wrappers are dereferenced. Nil pointers, whitespace-only values, and
+// unsupported kinds are treated as absent.
 func ExtractID[T any](t T, idFieldName string) string {
 	return extractID(reflect.ValueOf(t), idFieldName, make(map[extractIDPointer]struct{}))
 }
@@ -100,12 +106,12 @@ func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer
 			continue
 		}
 
-		if idFieldName != "" && strings.EqualFold(field.Name, idFieldName) {
-			return fmt.Sprintf("%v", v.Field(i).Interface())
-		}
-
-		if strings.EqualFold(field.Name, "ID") || strings.EqualFold(field.Name, "Id") {
-			return fmt.Sprintf("%v", v.Field(i).Interface())
+		if idFieldName != "" {
+			if strings.EqualFold(field.Name, idFieldName) {
+				return extractIDValue(v.Field(i))
+			}
+		} else if strings.EqualFold(field.Name, "ID") || strings.EqualFold(field.Name, "Id") {
+			return extractIDValue(v.Field(i))
 		}
 	}
 
@@ -119,6 +125,53 @@ func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer
 	}
 
 	return ""
+}
+
+func extractIDValue(v reflect.Value) string {
+	var pointerStringer fmt.Stringer
+
+	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
+		if v.IsNil() {
+			return ""
+		}
+
+		if v.Kind() == reflect.Pointer && pointerStringer == nil && v.CanInterface() {
+			pointerStringer, _ = v.Interface().(fmt.Stringer)
+		}
+
+		v = v.Elem()
+	}
+
+	if !v.IsValid() || !v.CanInterface() {
+		return ""
+	}
+
+	if stringer, ok := v.Interface().(fmt.Stringer); ok {
+		return nonEmptyID(stringer.String())
+	}
+
+	if pointerStringer != nil {
+		return nonEmptyID(pointerStringer.String())
+	}
+
+	switch v.Kind() {
+	case reflect.String:
+		return nonEmptyID(v.String())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10)
+	default:
+		return ""
+	}
+}
+
+func nonEmptyID(id string) string {
+	if strings.TrimSpace(id) == "" {
+		return ""
+	}
+
+	return id
 }
 
 // Unmarshal with custom error.

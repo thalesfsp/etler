@@ -21,18 +21,22 @@ import (
 // Name of the processor.
 const Name = "storage"
 
+// defaultTarget is the storage target used when WithTarget is not specified.
+const defaultTarget = "etl"
+
 // Storage definition.
 type Storage[In any] struct {
 	processor.IProcessor[In] `json:"processor" validate:"required"`
 }
 
 // IDFunc derives a storage ID from an item.
-type IDFunc[In any] func(in In) string
+type IDFunc[In any] func(ctx context.Context, in In) (string, error)
 
 type config[In any] struct {
 	idFunc           IDFunc[In]
 	idFuncSet        bool
 	idFieldName      string
+	target           string
 	processorOptions []processor.Func[In]
 }
 
@@ -43,7 +47,8 @@ type Func[In any] func(c *config[In])
 // Options.
 //////
 
-// WithIDFunc sets the function used to derive a storage ID from an item.
+// WithIDFunc sets the function used to derive a storage ID from an item. The
+// function is called concurrently and must be safe for concurrent use.
 func WithIDFunc[In any](idFunc IDFunc[In]) Func[In] {
 	return func(c *config[In]) {
 		c.idFunc = idFunc
@@ -58,6 +63,13 @@ func WithIDFieldName[In any](idFieldName string) Func[In] {
 	}
 }
 
+// WithTarget sets the storage target used by Create. The default is "etl".
+func WithTarget[In any](target string) Func[In] {
+	return func(c *config[In]) {
+		c.target = target
+	}
+}
+
 // WithProcessorOptions applies options to the underlying processor.
 func WithProcessorOptions[In any](opts ...processor.Func[In]) Func[In] {
 	return func(c *config[In]) {
@@ -65,16 +77,13 @@ func WithProcessorOptions[In any](opts ...processor.Func[In]) Func[In] {
 	}
 }
 
-func resolveID[In any](cfg config[In], in In) (string, error) {
+func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, error) {
 	if cfg.idFuncSet {
-		if cfg.idFunc == nil {
-			return "", customerror.NewRequiredError(
-				"custom id function",
-				customerror.WithMessage("custom id function is nil"),
-			)
+		id, err := cfg.idFunc(ctx, in)
+		if err != nil {
+			return "", err
 		}
 
-		id := cfg.idFunc(in)
 		if id == "" {
 			return "", customerror.NewRequiredError(
 				"custom id",
@@ -131,7 +140,9 @@ func New[In any](
 		}
 	}
 
-	cfg := config[In]{}
+	cfg := config[In]{
+		target: defaultTarget,
+	}
 
 	// Apply options before building the transform so it captures the resolved
 	// storage configuration.
@@ -141,6 +152,13 @@ func New[In any](
 		}
 
 		opt(&cfg)
+	}
+
+	if cfg.idFuncSet && cfg.idFunc == nil {
+		return nil, customerror.NewRequiredError(
+			"custom id function",
+			customerror.WithMessage("custom id function is nil"),
+		)
 	}
 
 	for _, opt := range cfg.processorOptions {
@@ -172,7 +190,7 @@ func New[In any](
 				tracedContext,
 				processingData,
 				func(ctx context.Context, in In) (In, error) {
-					id, err := resolveID(cfg, in)
+					id, err := resolveID(ctx, cfg, in)
 					if err != nil {
 						return *new(In), err
 					}
@@ -180,9 +198,9 @@ func New[In any](
 					// ID is lost because `in` is Generic and the Run func
 					// signature forces to return the same type as the input.
 					if _, err := s.Create(
-						tracedContext,
+						ctx,
 						idPrefix+id,
-						"etl",
+						cfg.target,
 						in,
 						&create.Create{},
 					); err != nil {
