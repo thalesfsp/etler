@@ -31,6 +31,73 @@ ETL pipelines enable organizations to:
 
 - Testing and Documentation: ETLer emphasizes the importance of testing and documentation. The framework includes a comprehensive suite of unit tests to ensure the reliability and correctness of pipeline components. The codebase is documented, with comments explaining the purpose and functionality of components facilitating adoption, and enable developers to effectively leverage the framework.
 
+## Installation
+
+```bash
+go get github.com/thalesfsp/etler/v4
+```
+
+Requires Go 1.25 or newer.
+
+## Quick start
+
+A pipeline is made of stages; each stage runs its processors in order, then
+converts every item.
+
+```go
+process, _ := processor.New("double", "doubles each value",
+    func(_ context.Context, in []int) ([]int, error) {
+        out := make([]int, len(in))
+        for i, v := range in {
+            out[i] = v * 2
+        }
+        return out, nil
+    })
+
+convert, _ := passthru.New[int]()
+
+stg, _ := stage.New("stage-1", "doubles", convert, process)
+
+p, _ := pipeline.New("my-pipeline", "doubles every value", false, stg)
+
+tasks, err := p.Run(context.Background(), []int{1, 2, 3})
+// tasks[len(tasks)-1].ProcessingData == []int{2, 4, 6}
+```
+
+Every package ships runnable examples — see them on
+[pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
+`go test -run Example ./...`.
+
+### Concurrency contract
+
+Three rules the design relies on:
+
+- **Converters must be safe for concurrent use.** A stage converts its items
+  concurrently, so the conversion function is called from many goroutines.
+- **Processors must not mutate their input slice, or the values it points to.**
+  A stage reuses the returned slice as the next processor's input, and async
+  processors receive only a shallow copy.
+- **A single `Pipeline` or `Stage` instance must not be `Run` concurrently with
+  itself.** Each instance owns its progress, status and duration metrics.
+  Separate instances are fully independent.
+
+## Upgrading from v3
+
+The import path changes to `github.com/thalesfsp/etler/v4`. Beyond that:
+
+- `OnFinished` and `Async` are no longer exported struct fields — use the
+  `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
+  signatures are unchanged.
+- The CSV loader now maps struct fields by `csv:"..."` tag (or exact field
+  name) instead of `json:"..."`, matching the CSV converter. Plain `int`,
+  `float64` and `bool` fields now decode correctly, so the old
+  `json:"age,string"` workaround should be removed.
+- Storage writes derive a deterministic id from each item, so retrying a failed
+  write overwrites instead of duplicating.
+- `processor.New("")` returns an error; a name is required.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
+
 ## Architectural Modularity and Flexibility
 
 ETLer is designed with architectural modularity and flexibility in mind, leveraging Go's powerful features to create a highly extensible and customizable ETL framework.
