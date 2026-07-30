@@ -3,7 +3,6 @@ package customapm
 import (
 	"context"
 	"expvar"
-	"fmt"
 
 	"github.com/thalesfsp/etler/v3/internal/logging"
 	"github.com/thalesfsp/status"
@@ -85,10 +84,18 @@ func logAndMetrics(
 	//////
 
 	// Correlates the transaction, span and log, and logs it.
-	if l != nil {
+	if logging.Admits(l, level.Debug) {
+		message := what + "." + nameOf + "." + operation.String()
+
+		if !apm.DefaultTracer.Active() {
+			l.PrintlnWithOptions(level.Debug, message)
+
+			return
+		}
+
 		l.PrintlnWithOptions(
 			level.Debug,
-			fmt.Sprintf("%s.%s.%s", what, nameOf, operation),
+			message,
 			sypl.WithFields(logging.ToAPM(ctx, make(fields.Fields))),
 		)
 	}
@@ -149,11 +156,11 @@ func Trace(
 
 	ctx = apm.ContextWithTransaction(ctx, tx)
 
-	sType := fmt.Sprintf("%s.%s.%s", what, nameOf, operation)
+	sType := what + "." + nameOf + "." + operation.String()
 
 	span, ctx := apm.StartSpan(
 		ctx,
-		fmt.Sprintf("%s.%s", nameOf, operation),
+		nameOf+"."+operation.String(),
 		sType,
 	)
 

@@ -6,9 +6,69 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/fields"
+	"github.com/thalesfsp/sypl/v2/level"
+	"github.com/thalesfsp/sypl/v2/output"
 	"go.elastic.co/apm"
 )
+
+// Admits follows sypl's output max-level rule.
+func TestAdmits(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxLevel level.Level
+		logLevel level.Level
+		want     bool
+	}{
+		{
+			name:     "error rejects debug",
+			maxLevel: level.Error,
+			logLevel: level.Debug,
+			want:     false,
+		},
+		{
+			name:     "error admits error",
+			maxLevel: level.Error,
+			logLevel: level.Error,
+			want:     true,
+		},
+		{
+			name:     "debug admits debug",
+			maxLevel: level.Debug,
+			logLevel: level.Debug,
+			want:     true,
+		},
+		{
+			name:     "debug rejects trace",
+			maxLevel: level.Debug,
+			logLevel: level.Trace,
+			want:     false,
+		},
+		{
+			name:     "trace admits debug",
+			maxLevel: level.Trace,
+			logLevel: level.Debug,
+			want:     true,
+		},
+		{
+			name:     "trace admits trace",
+			maxLevel: level.Trace,
+			logLevel: level.Trace,
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, o := output.SafeBuffer(level.Error)
+			l := sypl.New("admission-test", o)
+			l.SetMaxLevel(tt.maxLevel)
+
+			assert.Equal(t, tt.want, Admits(l, tt.logLevel))
+		})
+	}
+}
 
 // Get returns a singleton.
 func TestGet_singleton(t *testing.T) {

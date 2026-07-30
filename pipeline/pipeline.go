@@ -194,19 +194,21 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 		p.GetOnFinished()(ctx, p, originalTask, tasksOut)
 	}
 
-	p.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", p.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", p.GetCounterCreated().String()),
-		sypl.WithField("counterDone", p.GetCounterDone().String()),
-		sypl.WithField("counterFailed", p.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", p.GetCounterRunning().String()),
-		sypl.WithField("duration", p.GetDuration().String()),
-		sypl.WithField("progress", p.GetProgress().String()),
-		sypl.WithField("progressPercent", p.GetProgressPercent().String()),
-		sypl.WithField("status", p.GetStatus().String()),
-	)
+	if logging.Admits(p.GetLogger(), level.Debug) {
+		p.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", p.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", p.GetCounterCreated().String()),
+			sypl.WithField("counterDone", p.GetCounterDone().String()),
+			sypl.WithField("counterFailed", p.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", p.GetCounterRunning().String()),
+			sypl.WithField("duration", p.GetDuration().String()),
+			sypl.WithField("progress", p.GetProgress().String()),
+			sypl.WithField("progressPercent", p.GetProgressPercent().String()),
+			sypl.WithField("status", p.GetStatus().String()),
+		)
+	}
 }
 
 // GetProgress returns the `CounterProgress` of the stage.
@@ -271,7 +273,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		p.GetStatus().Set(status.Runnning.String())
 	}
 
-	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	if logging.Admits(p.GetLogger(), level.Trace) {
+		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	}
 
 	// Progress is relative to the current run.
 	p.GetProgress().Set(0)

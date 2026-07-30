@@ -155,7 +155,9 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 
 	c.GetStatus().Set(status.Runnning.String())
 
-	c.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	if logging.Admits(c.GetLogger(), level.Debug) {
+		c.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	}
 
 	//////
 	// Run conversor.
@@ -199,17 +201,19 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	c.GetDuration().Set(time.Since(now).Milliseconds())
 
 	// Print the converter's status.
-	c.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", c.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", c.GetCounterCreated().String()),
-		sypl.WithField("counterDone", c.GetCounterDone().String()),
-		sypl.WithField("counterFailed", c.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", c.GetCounterRunning().String()),
-		sypl.WithField("duration", c.GetDuration().String()),
-		sypl.WithField("status", c.GetStatus().String()),
-	)
+	if logging.Admits(c.GetLogger(), level.Debug) {
+		c.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", c.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", c.GetCounterCreated().String()),
+			sypl.WithField("counterDone", c.GetCounterDone().String()),
+			sypl.WithField("counterFailed", c.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", c.GetCounterRunning().String()),
+			sypl.WithField("duration", c.GetDuration().String()),
+			sypl.WithField("status", c.GetStatus().String()),
+		)
+	}
 
 	return out, nil
 }
