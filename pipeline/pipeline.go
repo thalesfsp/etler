@@ -267,7 +267,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		p.GetName(),
@@ -275,7 +275,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		p.GetLogger(),
 		p.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
 
 	now := time.Now()
 	durationSet := false

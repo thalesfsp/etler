@@ -153,7 +153,7 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		c.GetName(),
@@ -161,7 +161,7 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 		c.Logger,
 		c.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
 
 	c.GetStatus().Set(status.Runnning.String())
 
