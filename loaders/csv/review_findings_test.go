@@ -154,6 +154,114 @@ func TestLoad_rejectsNumericOverflow(t *testing.T) {
 	}
 }
 
+func TestLoad_preservesIntegerBoundariesInDecimalForms(t *testing.T) {
+	t.Run("int64 boundaries", func(t *testing.T) {
+		type row struct {
+			N int64
+		}
+
+		for _, testCase := range []struct {
+			value string
+			want  int64
+		}{
+			{value: "9223372036854775807", want: math.MaxInt64},
+			{value: "9223372036854775807.0", want: math.MaxInt64},
+			{value: "-9223372036854775808", want: math.MinInt64},
+			{value: "-9223372036854775808.0", want: math.MinInt64},
+		} {
+			t.Run(testCase.value, func(t *testing.T) {
+				out, err := Load[[]row](strings.NewReader("N\n" + testCase.value + "\n"))
+				require.NoError(t, err)
+				require.Equal(t, []row{{N: testCase.want}}, out)
+			})
+		}
+
+		for _, value := range []string{
+			"9223372036854775808",
+			"9223372036854775808.0",
+			"-9223372036854775809",
+			"-9223372036854775809.0",
+		} {
+			t.Run("reject "+value, func(t *testing.T) {
+				out, err := Load[[]row](strings.NewReader("N\n" + value + "\n"))
+				assert.Nil(t, out)
+				require.Error(t, err)
+				assert.ErrorContains(t, err, "field N")
+				assert.ErrorContains(t, err, value)
+			})
+		}
+	})
+
+	t.Run("uint64 boundaries", func(t *testing.T) {
+		type row struct {
+			N uint64
+		}
+
+		for _, value := range []string{
+			"18446744073709551615",
+			"18446744073709551615.0",
+		} {
+			t.Run(value, func(t *testing.T) {
+				out, err := Load[[]row](strings.NewReader("N\n" + value + "\n"))
+				require.NoError(t, err)
+				require.Equal(t, []row{{N: math.MaxUint64}}, out)
+			})
+		}
+
+		for _, value := range []string{
+			"18446744073709551616",
+			"18446744073709551616.0",
+			"-1",
+			"-1.0",
+		} {
+			t.Run("reject "+value, func(t *testing.T) {
+				out, err := Load[[]row](strings.NewReader("N\n" + value + "\n"))
+				assert.Nil(t, out)
+				require.Error(t, err)
+				assert.ErrorContains(t, err, "field N")
+				assert.ErrorContains(t, err, value)
+			})
+		}
+	})
+
+	t.Run("uint8 signed zero forms agree", func(t *testing.T) {
+		type row struct {
+			N uint8
+		}
+
+		for _, value := range []string{"-0", "-0.0"} {
+			t.Run(value, func(t *testing.T) {
+				out, err := Load[[]row](strings.NewReader("N\n" + value + "\n"))
+				require.NoError(t, err)
+				require.Equal(t, []row{{N: 0}}, out)
+			})
+		}
+	})
+
+	t.Run("partial header overflow still errors", func(t *testing.T) {
+		type row struct {
+			N uint8 `csv:"number,partial"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("total_number\n256\n"))
+		assert.Nil(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "field N")
+		assert.ErrorContains(t, err, "256")
+	})
+
+	t.Run("integer default uses the same signed-zero rule", func(t *testing.T) {
+		type row struct {
+			N    uint8 `csv:"N,default=-0"`
+			Note string
+		}
+
+		out, err := Load[[]row](strings.NewReader("N,Note\n,ok\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Note: "ok"}}, out)
+	})
+}
+
 func TestLoad_matchesUntaggedFieldsCaseInsensitively(t *testing.T) {
 	t.Run("lowercase header", func(t *testing.T) {
 		type row struct {
@@ -171,6 +279,104 @@ func TestLoad_matchesUntaggedFieldsCaseInsensitively(t *testing.T) {
 		}
 
 		out, err := Load[[]row](strings.NewReader("name,display_name\nwrong,alice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Name: "alice"}}, out)
+	})
+}
+
+func TestLoad_resolvesCaseFoldedHeaderMatchesDeterministically(t *testing.T) {
+	t.Run("exact tag wins over untagged field", func(t *testing.T) {
+		type row struct {
+			Tagged string `csv:"name"`
+			Name   string
+		}
+
+		out, err := Load[[]row](strings.NewReader("name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Tagged: "alice"}}, out)
+	})
+
+	t.Run("exact tag wins even when untagged key is identical", func(t *testing.T) {
+		type row struct {
+			Name   string
+			Tagged string `csv:"Name"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Tagged: "alice"}}, out)
+	})
+
+	t.Run("exact tag precedence supports pointer rows", func(t *testing.T) {
+		type row struct {
+			Name   string
+			Tagged string `csv:"Name"`
+		}
+
+		out, err := Load[[]*row](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []*row{{Tagged: "alice"}}, out)
+	})
+
+	t.Run("exact nested tag allocates embedded pointer", func(t *testing.T) {
+		type Nested struct {
+			Tagged string `csv:"Name"`
+		}
+		type row struct {
+			Name string
+			*Nested
+		}
+
+		out, err := Load[[]row](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Nested: &Nested{Tagged: "alice"}}}, out)
+	})
+
+	t.Run("exact tag precedence preserves defaults", func(t *testing.T) {
+		type row struct {
+			Name   string
+			Tagged string `csv:"Name,default=alice"`
+			Note   string
+		}
+
+		out, err := Load[[]row](strings.NewReader("Name,Note\n,ok\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Tagged: "alice", Note: "ok"}}, out)
+	})
+
+	t.Run("exact tag precedence reports conversion errors", func(t *testing.T) {
+		type row struct {
+			Name   string
+			Tagged int `csv:"Name"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("Name\nbad\n"))
+		assert.Nil(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `strconv.ParseInt: parsing "bad": invalid syntax`)
+	})
+
+	t.Run("ambiguous untagged fields error", func(t *testing.T) {
+		type row struct {
+			Foo string
+			FOO string
+		}
+
+		out, err := Load[[]row](strings.NewReader("foo\nalice\n"))
+		assert.Nil(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `ambiguous CSV header "foo"`)
+		assert.ErrorContains(t, err, "Foo")
+		assert.ErrorContains(t, err, "FOO")
+	})
+
+	t.Run("unambiguous case-folded match still works", func(t *testing.T) {
+		type row struct {
+			Name string
+			Note string
+		}
+
+		out, err := Load[[]row](strings.NewReader("name\nalice\n"))
 		require.NoError(t, err)
 		require.Equal(t, []row{{Name: "alice"}}, out)
 	})
