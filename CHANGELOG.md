@@ -34,12 +34,14 @@ coverage raised to ~99%.
   *converter* already used for writing. Reading and writing are therefore
   symmetric, and plain `int`, `float64` and `bool` struct fields now work.
   Structs are mapped by `csv:"..."` tag instead of `json:"..."` (untagged
-  top-level fields still match their header case-insensitively; nested struct
-  fields are matched by their synthesized dotted key, case-sensitively), and the
-  `json:"age,string"` workaround is no longer needed. A value that does not fit
-  its destination field is now an error instead of a silent wraparound. The
-  loader also no longer strips tab characters from values, which previously
-  corrupted legitimately quoted content such as `"a\tb"`.
+  fields still match their header case-insensitively), and the
+  `json:"age,string"` workaround is no longer needed. Numeric fields require
+  strict decimal syntax: `010` is ten, not eight; `1_0` and `127.9` into an
+  integer are errors rather than silently becoming 10 and 127; and a value that
+  does not fit its destination is rejected instead of wrapping. A header that
+  matches two fields ambiguously is an error rather than resolved by
+  declaration order. The loader also no longer strips tab characters, which
+  previously corrupted legitimately quoted content such as `"a\tb"`.
 - **Storage writes now use a stable id** derived from the item, instead of a
   fresh UUID per attempt, so retrying after a timeout reuses the same key rather
   than inserting under a new one. Whether that overwrites or is rejected is the
@@ -80,11 +82,11 @@ committed at [`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the
 | Benchmark | Time | Memory | Allocations |
 | --- | --- | --- | --- |
 | Pipeline, 2 stages × 1k items | 19.0 → 5.7 ms (−70%) | 30.0 → 6.3 MiB (−79%) | 542k → 112k (−79%) |
-| Stage, 1k items | 9.7 → 3.0 ms (−69%) | 14.9 → 3.1 MiB (−79%) | 271k → 56k (−79%) |
-| Stage, single item | 145 → 10.5 µs (−93%) | 68 → 8 KiB (−88%) | 762 → 93 (−88%) |
-| Processor, 1k items | 71.6 → 2.7 µs (−96%) | 44 → 11 KiB (−74%) | 236 → 13 (−94%) |
-| Converter, single call | 58.5 → 2.0 µs (−97%) | 36 → 3 KiB (−91%) | 235 → 12 (−95%) |
-| CSV loader, 1k rows | 1.09 → 0.31 ms (−71%) | 802 → 401 KiB (−50%) | 18.9k → 11.1k (−41%) |
+| Stage, 1k items | 9.7 → 2.9 ms (−70%) | 14.9 → 3.1 MiB (−79%) | 271k → 56k (−79%) |
+| Stage, single item | 145 → 10.9 µs (−92%) | 68 → 8 KiB (−88%) | 762 → 93 (−88%) |
+| Processor, 1k items | 71.6 → 2.6 µs (−96%) | 44 → 11 KiB (−75%) | 236 → 13 (−94%) |
+| Converter, single call | 58.5 → 2.1 µs (−96%) | 36 → 3 KiB (−90%) | 235 → 12 (−95%) |
+| CSV loader, 1k rows | 1.09 → 0.36 ms (−67%) | 802 → 370 KiB (−54%) | 18.9k → 10.1k (−47%) |
 
 Every figure above is the median of the three runs in the committed files, and
 can be recomputed from them.
