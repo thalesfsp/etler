@@ -137,28 +137,99 @@ func TestPipeline_SetPause_togglesPausedState(t *testing.T) {
 	assert.Equal(t, status.Runnning.String(), p.GetStatus().Value())
 }
 
-// Regression: resuming only changes the status when the pipeline was paused.
-// A redundant resume after completion must preserve the terminal status.
-func TestPipeline_SetPause_resumePreservesTerminalStatus(t *testing.T) {
-	p, err := New("pause-terminal-audit", "terminal status survives resume", false,
-		newIdentityStage(t, "stage-pause-terminal-audit"),
+// Regression: pausing may temporarily report paused, but resuming must restore
+// a terminal lifecycle status rather than inventing an active run.
+func TestPipeline_SetPause_resumeRestoresTerminalStatus(t *testing.T) {
+	t.Run("done", func(t *testing.T) {
+		p, err := New("pause-done-audit", "done status survives pause", false,
+			newIdentityStage(t, "stage-pause-done-audit"),
+		)
+		require.NoError(t, err)
+
+		_, err = p.Run(context.Background(), []int{1})
+		require.NoError(t, err)
+		require.Equal(t, status.Done.String(), p.GetStatus().Value())
+
+		p.SetPause(true)
+		require.Equal(t, status.Paused.String(), p.GetStatus().Value())
+
+		p.SetPause(false)
+		assert.Equal(t, status.Done.String(), p.GetStatus().Value(),
+			"resuming a completed pipeline must restore done")
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		boom := errors.New("pause-failed-audit")
+
+		p, err := New("pause-failed-audit", "failed status survives pause", false,
+			newFailingStage(t, "stage-pause-failed-audit", boom),
+		)
+		require.NoError(t, err)
+
+		_, err = p.Run(context.Background(), []int{1})
+		require.ErrorIs(t, err, boom)
+		require.Equal(t, status.Failed.String(), p.GetStatus().Value())
+
+		p.SetPause(true)
+		require.Equal(t, status.Paused.String(), p.GetStatus().Value())
+
+		p.SetPause(false)
+		assert.Equal(t, status.Failed.String(), p.GetStatus().Value(),
+			"resuming a failed pipeline must restore failed")
+	})
+}
+
+// Regression: a pipeline paused while Run is active must report running as
+// soon as it resumes, before the still-active run completes.
+func TestPipeline_SetPause_resumeMidRunReportsRunning(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	blocking, err := processor.New(
+		"pause-mid-run-blocking",
+		"blocks until released",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			close(entered)
+			<-release
+
+			return processingData, nil
+		},
 	)
 	require.NoError(t, err)
+
+	stg, err := stage.New(
+		"stage-pause-mid-run",
+		"mid-run pause stage",
+		converter.MustDefault(
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+		),
+		blocking,
+	)
+	require.NoError(t, err)
+
+	p, err := New("pause-mid-run-audit", "mid-run resume status", false, stg)
+	require.NoError(t, err)
+
+	runDone := make(chan error, 1)
+
+	go func() {
+		_, err := p.Run(context.Background(), []int{1})
+		runDone <- err
+	}()
+
+	<-entered
 
 	p.SetPause(true)
 	require.Equal(t, status.Paused.String(), p.GetStatus().Value())
 
 	p.SetPause(false)
-	require.Equal(t, status.Runnning.String(), p.GetStatus().Value(),
-		"a paused pipeline must report running after it is resumed")
+	assert.Equal(t, status.Runnning.String(), p.GetStatus().Value(),
+		"resuming an active run must report running")
 
-	_, err = p.Run(context.Background(), []int{1})
-	require.NoError(t, err)
-	require.Equal(t, status.Done.String(), p.GetStatus().Value())
-
-	p.SetPause(false)
-	assert.Equal(t, status.Done.String(), p.GetStatus().Value(),
-		"resuming an unpaused completed pipeline must preserve its terminal status")
+	close(release)
+	require.NoError(t, <-runDone)
 }
 
 // E2E: pausing the pipeline must actually hold processors back until resumed.

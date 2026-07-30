@@ -41,9 +41,9 @@ type Loader[In, Out any] struct {
 	// Name of the stage.
 	Name string `json:"name" validate:"required"`
 
-	// OnFinished is the function that is called when a processor finishes its
+	// onFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[In, Out] `json:"-"`
+	onFinished OnFinished[In, Out] `json:"-"`
 
 	// Metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
@@ -55,7 +55,7 @@ type Loader[In, Out any] struct {
 	Duration  *expvar.Int    `json:"duration"`
 	Status    *expvar.String `json:"status"`
 
-	// mu guards OnFinished.
+	// mu guards onFinished.
 	mu sync.RWMutex
 }
 
@@ -113,7 +113,7 @@ func (c *Loader[In, Out]) GetOnFinished() OnFinished[In, Out] {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.OnFinished
+	return c.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
@@ -121,7 +121,7 @@ func (c *Loader[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.OnFinished = onFinished
+	c.onFinished = onFinished
 }
 
 // GetCreatedAt returns the created at time.
@@ -235,6 +235,14 @@ func New[In, Out any](
 	fn Load[In, Out],
 	opts ...Func[In, Out],
 ) (ILoader[In, Out], error) {
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
 	c := &Loader[In, Out]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),

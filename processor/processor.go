@@ -42,14 +42,14 @@ type Processor[ProcessingData any] struct {
 	// Description of the processor.
 	Description string `json:"description"`
 
-	// Async if set will run the processor in a go routine.
+	// async if set will run the processor in a go routine.
 	//
 	// WARN: The output of the processing will not be forwarded!
-	Async bool `default:"false" json:"async"`
+	async bool `default:"false" json:"async"`
 
-	// OnFinished is the function that is called when a processor finishes its
+	// onFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[ProcessingData] `json:"-"`
+	onFinished OnFinished[ProcessingData] `json:"-"`
 
 	// Metrics.
 	CounterCreated     *expvar.Int `json:"counterCreated"`
@@ -62,7 +62,7 @@ type Processor[ProcessingData any] struct {
 	Duration  *expvar.Int    `json:"duration"`
 	Status    *expvar.String `json:"status"`
 
-	// mu guards Async and OnFinished.
+	// mu guards async and onFinished.
 	mu sync.RWMutex
 }
 
@@ -120,7 +120,7 @@ func (p *Processor[ProcessingData]) GetOnFinished() OnFinished[ProcessingData] {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return p.OnFinished
+	return p.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
@@ -128,7 +128,7 @@ func (p *Processor[ProcessingData]) SetOnFinished(onFinished OnFinished[Processi
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.OnFinished = onFinished
+	p.onFinished = onFinished
 }
 
 // GetType returns the entity type.
@@ -167,7 +167,7 @@ func (p *Processor[ProcessingData]) SetAsync(async bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.Async = async
+	p.async = async
 }
 
 // GetAsync returns if the processor is running in a go routine.
@@ -175,7 +175,7 @@ func (p *Processor[ProcessingData]) GetAsync() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return p.Async
+	return p.async
 }
 
 // Run the transform function.
@@ -316,6 +316,14 @@ func New[ProcessingData any](
 	fn Transform[ProcessingData],
 	opts ...Func[ProcessingData],
 ) (IProcessor[ProcessingData], error) {
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
 	p := &Processor[ProcessingData]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),

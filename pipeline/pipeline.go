@@ -41,9 +41,9 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	// Name of the processor.
 	Name string `json:"name" validate:"required"`
 
-	// OnFinished is the function that is called when a processor finishes its
+	// onFinished is the function that is called when a processor finishes its
 	// execution.
-	OnFinished OnFinished[ProcessedData, ConvertedOut] `json:"-"`
+	onFinished OnFinished[ProcessedData, ConvertedOut] `json:"-"`
 
 	// Stages to be used ProcessedData the pipeline.
 	Stages []stage.IStage[ProcessedData, ConvertedOut] `json:"stages" validate:"required,gt=0"`
@@ -60,14 +60,15 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	ProgressPercent *expvar.String `json:"progressPercent"`
 	Status          *expvar.String `json:"status"`
 
-	// mu guards OnFinished.
+	// mu guards onFinished.
 	mu sync.RWMutex
 
 	// pause is this pipeline's pause controller. Pausing one pipeline does
 	// not affect any other.
 	pause *shared.PauseController
 	// pauseMu coordinates pause status and controller transitions.
-	pauseMu sync.Mutex
+	pauseMu           sync.Mutex
+	statusBeforePause string
 }
 
 //////
@@ -133,6 +134,10 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	defer p.pauseMu.Unlock()
 
 	if state {
+		if !p.pause.Paused() {
+			p.statusBeforePause = p.GetStatus().Value()
+		}
+
 		p.GetStatus().Set(status.Paused.String())
 
 		p.pause.Pause()
@@ -143,9 +148,15 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 	if p.pause.Paused() {
 		if p.GetStatus().Value() == status.Paused.String() {
 			// Updates the pipeline's status.
-			p.GetStatus().Set(status.Runnning.String())
+			switch p.statusBeforePause {
+			case status.Done.String(), status.Failed.String():
+				p.GetStatus().Set(p.statusBeforePause)
+			default:
+				p.GetStatus().Set(status.Runnning.String())
+			}
 		}
 
+		p.statusBeforePause = ""
 		p.pause.Resume()
 	}
 }
@@ -155,7 +166,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetOnFinished() OnFinished[Proce
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return p.OnFinished
+	return p.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
@@ -163,7 +174,7 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetOnFinished(onFinished OnFinis
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.OnFinished = onFinished
+	p.onFinished = onFinished
 }
 
 // GetType returns the entity type.
@@ -304,7 +315,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	// block on the pause controller.
 	p.pauseMu.Lock()
 
-	if !p.pause.Paused() {
+	if p.pause.Paused() {
+		p.statusBeforePause = status.Runnning.String()
+	} else {
 		p.GetStatus().Set(status.Runnning.String())
 	}
 
@@ -448,6 +461,14 @@ func New[ProcessedData, ConvertedOut any](
 	concurrentStage bool,
 	stages ...stage.IStage[ProcessedData, ConvertedOut],
 ) (IPipeline[ProcessedData, ConvertedOut], error) {
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
 	p := &Pipeline[ProcessedData, ConvertedOut]{
 		ConcurrentStage: concurrentStage,
 		Stages:          stages,

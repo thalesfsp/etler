@@ -27,6 +27,19 @@ func TestLoader_metadataAndOnFinished(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	// The callback field is intentionally unexported; accessors are the
+	// supported mutation path and therefore cannot bypass its mutex.
+	assert.NotNil(t, l.GetOnFinished())
+
+	l.SetOnFinished(nil)
+	assert.Nil(t, l.GetOnFinished())
+
+	l.SetOnFinished(func(ctx context.Context, l ILoader[string, []int], in string, out []int) {
+		gotIn = in
+		gotOut = out
+	})
+	assert.NotNil(t, l.GetOnFinished())
+
 	assert.Equal(t, "meta-loader", l.GetName())
 	assert.Equal(t, "metadata test", l.GetDescription())
 	assert.Equal(t, Type, l.GetType())
