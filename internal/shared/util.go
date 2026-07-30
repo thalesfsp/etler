@@ -52,10 +52,10 @@ func Flatten2D[T any](data [][]T) []T {
 // field name is configured, it searches for ID or Id.
 //
 // NOTE: Only exported fields are considered.
-// NOTE: Supported ID values are strings, signed integers, unsigned integers
-// except uintptr, and fmt.Stringer implementations. Pointer and interface
-// wrappers are dereferenced. Nil pointers, whitespace-only values, and
-// unsupported kinds are treated as absent.
+// NOTE: Supported ID values are string, int, int8, int16, int32, int64, uint,
+// uint8, uint16, uint32, and uint64. Pointer and interface wrappers are
+// dereferenced first. Nil pointers, whitespace-only strings, uintptr, and all
+// other kinds are treated as absent.
 func ExtractID[T any](t T, idFieldName string) string {
 	return extractID(reflect.ValueOf(t), idFieldName, make(map[extractIDPointer]struct{}))
 }
@@ -128,15 +128,9 @@ func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer
 }
 
 func extractIDValue(v reflect.Value) string {
-	var pointerStringer fmt.Stringer
-
 	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
 		if v.IsNil() {
 			return ""
-		}
-
-		if v.Kind() == reflect.Pointer && pointerStringer == nil && v.CanInterface() {
-			pointerStringer, _ = v.Interface().(fmt.Stringer)
 		}
 
 		v = v.Elem()
@@ -144,14 +138,6 @@ func extractIDValue(v reflect.Value) string {
 
 	if !v.IsValid() || !v.CanInterface() {
 		return ""
-	}
-
-	if stringer, ok := v.Interface().(fmt.Stringer); ok {
-		return nonEmptyID(stringer.String())
-	}
-
-	if pointerStringer != nil {
-		return nonEmptyID(pointerStringer.String())
 	}
 
 	switch v.Kind() {

@@ -2,8 +2,10 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/thalesfsp/concurrentloop"
 	"github.com/thalesfsp/customerror/v2"
@@ -84,7 +86,7 @@ func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, erro
 			return "", err
 		}
 
-		if id == "" {
+		if strings.TrimSpace(id) == "" {
 			return "", customerror.NewRequiredError(
 				"custom id",
 				customerror.WithMessage("custom id function returned an empty id"),
@@ -161,6 +163,13 @@ func New[In any](
 		)
 	}
 
+	if strings.TrimSpace(cfg.target) == "" {
+		return nil, customerror.NewRequiredError(
+			"storage target",
+			customerror.WithMessage("storage target must not be empty"),
+		)
+	}
+
 	for _, opt := range cfg.processorOptions {
 		if opt == nil {
 			return nil, customerror.NewRequiredError("processor option")
@@ -211,7 +220,10 @@ func New[In any](
 				},
 				concurrentloopOpts...,
 			); len(errs) > 0 {
-				return nil, errs
+				return nil, customerror.NewFailedToError(
+					"map storage items",
+					customerror.WithError(errors.Join(errs...)),
+				)
 			}
 
 			return processingData, nil

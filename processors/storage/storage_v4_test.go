@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/thalesfsp/etler/v4/internal/shared"
 	"github.com/thalesfsp/status"
 )
 
@@ -22,6 +23,19 @@ type v4WithID struct {
 type v4WithCustomID struct {
 	Key  string `json:"key"`
 	Name string `json:"name"`
+}
+
+type v4PanickingStringerID struct {
+	Value string `json:"value"`
+}
+
+func (v4PanickingStringerID) String() string {
+	panic("String must not be called implicitly")
+}
+
+type v4WithPanickingStringerID struct {
+	ID   v4PanickingStringerID `json:"id"`
+	Name string                `json:"name"`
 }
 
 type v4Unmarshallable struct {
@@ -155,7 +169,7 @@ func TestStorage_customIDFuncErrorPropagatesWithoutWriting(t *testing.T) {
 
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), derivationErr.Error())
+	assert.ErrorIs(t, err, derivationErr)
 	assert.Equal(t, "run-context", <-contextValue)
 	assert.Empty(t, stub.createdIDs())
 }
@@ -174,6 +188,34 @@ func TestStorage_customTargetReachesCreate(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"archive"}, stub.createdTargets())
+}
+
+func TestNew_blankTargetReturnsError(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "empty"},
+		{name: "whitespace-only", target: " \t"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stub := &stubStorage{}
+
+			processor, err := New[v4NoID](
+				stub,
+				1,
+				"prefix-",
+				WithTarget[v4NoID](test.target),
+			)
+
+			assert.Nil(t, processor)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "target")
+			assert.Empty(t, stub.createdTargets())
+		})
+	}
 }
 
 func TestStorage_usesExtractedOrContentDerivedID(t *testing.T) {
@@ -217,6 +259,28 @@ func TestStorage_usesExtractedOrContentDerivedID(t *testing.T) {
 
 		assert.Equal(t, []string{"prefix-3b8f02c64624e355de637e609642b441ab1427b619d9fb91cb6c7b0e8f8ceed1"}, stub.createdIDs())
 	})
+}
+
+func TestStorage_stringerOnlyIDFallsBackToContentWithoutCallingString(t *testing.T) {
+	stub := &stubStorage{}
+	processor, err := New[v4WithPanickingStringerID](stub, 1, "prefix-")
+	require.NoError(t, err)
+
+	item := v4WithPanickingStringerID{
+		ID:   v4PanickingStringerID{Value: "field-content"},
+		Name: "alice",
+	}
+	content, err := shared.Marshal(item)
+	require.NoError(t, err)
+	wantID := "prefix-" + shared.GenerateIDBasedOnContent(string(content))
+
+	var out []v4WithPanickingStringerID
+	require.NotPanics(t, func() {
+		out, err = processor.Run(context.Background(), []v4WithPanickingStringerID{item})
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []v4WithPanickingStringerID{item}, out)
+	assert.Equal(t, []string{wantID}, stub.createdIDs())
 }
 
 func TestStorage_sameItemTwiceUsesSameID(t *testing.T) {
@@ -292,25 +356,37 @@ func TestStorage_idOptions(t *testing.T) {
 	})
 }
 
-func TestStorage_emptyCustomIDFailsWithoutWriting(t *testing.T) {
-	stub := &stubStorage{}
-	processor, err := New[v4NoID](
-		stub,
-		1,
-		"prefix-",
-		WithIDFunc(func(context.Context, v4NoID) (string, error) { return "", nil }),
-	)
-	require.NoError(t, err)
+func TestStorage_blankCustomIDFailsWithoutWriting(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{name: "empty"},
+		{name: "whitespace-only", id: " \t"},
+	}
 
-	out, err := processor.Run(context.Background(), []v4NoID{{Name: "alice"}})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stub := &stubStorage{}
+			processor, err := New[v4NoID](
+				stub,
+				1,
+				"prefix-",
+				WithIDFunc(func(context.Context, v4NoID) (string, error) { return test.id, nil }),
+			)
+			require.NoError(t, err)
 
-	assert.Nil(t, out)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "custom id function returned an empty id")
-	assert.Empty(t, stub.createdIDs())
-	assert.Equal(t, int64(0), stub.created.Load())
-	assert.Equal(t, "1", processor.GetCounterFailed().String())
-	assert.Equal(t, status.Failed.String(), processor.GetStatus().Value())
+			out, err := processor.Run(context.Background(), []v4NoID{{Name: "alice"}})
+
+			assert.Nil(t, out)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "custom id function returned an empty id")
+			assert.Empty(t, stub.createdIDs())
+			assert.Equal(t, int64(0), stub.created.Load())
+			assert.Equal(t, "1", processor.GetCounterFailed().String())
+			assert.Equal(t, status.Failed.String(), processor.GetStatus().Value())
+		})
+	}
 }
 
 func TestStorage_createErrorIsPropagatedAndRecorded(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/dal/v2/storage"
@@ -72,7 +73,7 @@ func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, erro
 			return "", err
 		}
 
-		if id == "" {
+		if strings.TrimSpace(id) == "" {
 			return "", customerror.NewRequiredError(
 				"custom id",
 				customerror.WithMessage("custom id function returned an empty id"),

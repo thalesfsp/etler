@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -98,27 +97,51 @@ func TestExtractID_nilAndWhitespaceValuesAreAbsent(t *testing.T) {
 	assert.Empty(t, ExtractID(withID{ID: &whitespaceID}, ""))
 }
 
-type auditStringerID int
+type auditStringerID struct {
+	calls *int
+}
 
 func (id auditStringerID) String() string {
-	return fmt.Sprintf("stringer-%d", id)
+	(*id.calls)++
+
+	return "stringer-id"
 }
 
 func TestExtractID_supportedAndUnsupportedKinds(t *testing.T) {
-	t.Run("signed integer", func(t *testing.T) {
-		assert.Equal(t, "-42", ExtractID(struct{ ID int64 }{ID: -42}, ""))
+	t.Run("pointer to string yields stable pointed-to value", func(t *testing.T) {
+		type withID struct {
+			ID *string
+		}
+
+		value := "stable"
+		item := withID{ID: &value}
+
+		first := ExtractID(item, "")
+		second := ExtractID(item, "")
+
+		assert.Equal(t, "stable", first)
+		assert.Equal(t, first, second)
 	})
 
-	t.Run("unsigned integer", func(t *testing.T) {
-		assert.Equal(t, "42", ExtractID(struct{ ID uint64 }{ID: 42}, ""))
+	t.Run("nil pointer is absent", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID *string }{}, ""))
 	})
 
-	t.Run("fmt.Stringer", func(t *testing.T) {
-		assert.Equal(t, "stringer-42", ExtractID(struct{ ID auditStringerID }{ID: 42}, ""))
+	t.Run("whitespace-only string is absent", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID string }{ID: " \t\n"}, ""))
 	})
 
 	t.Run("unsupported kind", func(t *testing.T) {
 		assert.Empty(t, ExtractID(struct{ ID []string }{ID: []string{"not", "an", "id"}}, ""))
+	})
+
+	t.Run("fmt.Stringer is not used implicitly", func(t *testing.T) {
+		calls := 0
+
+		assert.Empty(t, ExtractID(struct{ ID auditStringerID }{
+			ID: auditStringerID{calls: &calls},
+		}, ""))
+		assert.Zero(t, calls)
 	})
 
 	t.Run("uintptr is unsupported", func(t *testing.T) {
