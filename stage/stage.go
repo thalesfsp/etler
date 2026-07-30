@@ -190,7 +190,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		s.GetName(),
@@ -198,7 +198,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 		s.GetLogger(),
 		s.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
 
 	now := time.Now()
 	durationSet := false

@@ -12,6 +12,29 @@ import (
 	"go.elastic.co/apm"
 )
 
+//////
+// Vars, consts, and types.
+//////
+
+// Ender ends a traced span and any transaction created with it.
+type Ender struct {
+	span        *apm.Span
+	transaction *apm.Transaction
+}
+
+//////
+// Methods.
+//////
+
+// End ends the span before ending the transaction owned by this ender.
+func (e Ender) End() {
+	e.span.End()
+
+	if e.transaction != nil {
+		e.transaction.End()
+	}
+}
+
 // TXFromCtx Creates a new TX if none is found in the context, otherwise reuses
 // the existing one.
 //
@@ -55,12 +78,19 @@ import (
 // generic database operation of type "db". Both the Subtype and Action fields
 // of the SpanData object will be left blank in this case.
 func TXFromCtx(ctx context.Context, txName string, txType string) *apm.Transaction {
-	tx := apm.TransactionFromContext(ctx)
-	if tx == nil {
-		tx = apm.DefaultTracer.StartTransaction(txName, txType)
-	}
+	tx, _ := txFromCtx(ctx, txName, txType)
 
 	return tx
+}
+
+// txFromCtx returns a transaction and whether it was created by this call.
+func txFromCtx(ctx context.Context, txName string, txType string) (*apm.Transaction, bool) {
+	tx := apm.TransactionFromContext(ctx)
+	if tx == nil {
+		return apm.DefaultTracer.StartTransaction(txName, txType), true
+	}
+
+	return tx, false
 }
 
 // logAndMetrics logs and metrics.
@@ -104,7 +134,7 @@ func logAndMetrics(
 // Trace will trace an operation. It uses the existing TX otherwise it fallback
 // creating a new TX then it creates a new span within the TX.
 //
-// NOTE: It's up to the developer to call `span.End()`.
+// NOTE: It's up to the developer to call `ender.End()`.
 //
 // Note on TX and Span naming:
 //
@@ -151,8 +181,8 @@ func Trace(
 	operation status.Status,
 	l sypl.ISypl,
 	metric *expvar.Int,
-) (context.Context, *apm.Span) {
-	tx := TXFromCtx(ctx, nameOf, what)
+) (context.Context, Ender) {
+	tx, created := txFromCtx(ctx, nameOf, what)
 
 	ctx = apm.ContextWithTransaction(ctx, tx)
 
@@ -166,5 +196,9 @@ func Trace(
 
 	logAndMetrics(ctx, what, nameOf, operation, l, metric)
 
-	return ctx, span
+	if created {
+		return ctx, Ender{span: span, transaction: tx}
+	}
+
+	return ctx, Ender{span: span}
 }

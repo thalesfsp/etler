@@ -16,6 +16,7 @@ import (
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/sypl/v2/output"
 	"go.elastic.co/apm"
+	"go.elastic.co/apm/apmtest"
 	"go.elastic.co/apm/transport"
 )
 
@@ -41,6 +42,95 @@ func setDefaultTracer(t *testing.T, active bool) {
 		apm.DefaultTracer = original
 		tracer.Close()
 	})
+}
+
+func setRecordingDefaultTracer(t *testing.T) *apmtest.RecordingTracer {
+	t.Helper()
+
+	t.Setenv("ELASTIC_APM_ACTIVE", "true")
+	t.Setenv("ELASTIC_APM_CENTRAL_CONFIG", "false")
+	t.Setenv("ELASTIC_APM_METRICS_INTERVAL", "0s")
+	t.Setenv("ELASTIC_APM_RECORDING", "true")
+
+	recorder := apmtest.NewRecordingTracer()
+
+	original := apm.DefaultTracer
+	apm.DefaultTracer = recorder.Tracer
+
+	t.Cleanup(func() {
+		apm.DefaultTracer = original
+		recorder.Close()
+	})
+
+	return recorder
+}
+
+// Trace ends a transaction it creates and reports it with the expected name
+// and type.
+func TestTrace_endsCreatedTransaction(t *testing.T) {
+	recorder := setRecordingDefaultTracer(t)
+
+	_, ender := Trace(
+		context.Background(),
+		"converter",
+		"normalize",
+		status.Runnning,
+		nil,
+		nil,
+	)
+	ender.End()
+	recorder.Flush(nil)
+
+	payloads := recorder.Payloads()
+	require.Len(t, payloads.Transactions, 1)
+	assert.Equal(t, "normalize", payloads.Transactions[0].Name)
+	assert.Equal(t, "converter", payloads.Transactions[0].Type)
+}
+
+// Trace leaves an inherited transaction open for its caller to end.
+func TestTrace_doesNotEndInheritedTransaction(t *testing.T) {
+	recorder := setRecordingDefaultTracer(t)
+	tx := recorder.StartTransaction("caller-owned", "request")
+	ctx := apm.ContextWithTransaction(context.Background(), tx)
+
+	_, ender := Trace(ctx, "converter", "normalize", status.Runnning, nil, nil)
+	ender.End()
+
+	require.NotNil(t, tx.TransactionData, "the caller-owned transaction must remain open")
+
+	recorder.Flush(nil)
+	assert.Empty(t, recorder.Payloads().Transactions)
+
+	tx.End()
+	recorder.Flush(nil)
+
+	payloads := recorder.Payloads()
+	require.Len(t, payloads.Transactions, 1)
+	assert.Equal(t, "caller-owned", payloads.Transactions[0].Name)
+	assert.Equal(t, "request", payloads.Transactions[0].Type)
+}
+
+// Trace reports its span as a child of the transaction in the traced context.
+func TestTrace_reportsSpanAsTransactionChild(t *testing.T) {
+	recorder := setRecordingDefaultTracer(t)
+
+	_, ender := Trace(
+		context.Background(),
+		"converter",
+		"normalize",
+		status.Runnning,
+		nil,
+		nil,
+	)
+	ender.End()
+	recorder.Flush(nil)
+
+	payloads := recorder.Payloads()
+	require.Len(t, payloads.Transactions, 1)
+	require.Len(t, payloads.Spans, 1)
+	assert.Equal(t, payloads.Transactions[0].ID, payloads.Spans[0].TransactionID)
+	assert.Equal(t, payloads.Transactions[0].ID, payloads.Spans[0].ParentID)
+	assert.Equal(t, payloads.Transactions[0].TraceID, payloads.Spans[0].TraceID)
 }
 
 // Trace returns a context carrying the exact span name and type components.
@@ -75,7 +165,7 @@ func TestTrace_spanNameAndType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			setDefaultTracer(t, true)
 
-			ctx, span := Trace(
+			ctx, ender := Trace(
 				context.Background(),
 				tt.what,
 				tt.nameOf,
@@ -83,6 +173,7 @@ func TestTrace_spanNameAndType(t *testing.T) {
 				nil,
 				nil,
 			)
+			span := ender.span
 			require.NotNil(t, ctx)
 			require.NotNil(t, span)
 			require.NotNil(t, apm.TransactionFromContext(ctx))
@@ -94,8 +185,7 @@ func TestTrace_spanNameAndType(t *testing.T) {
 				span.Type+"."+span.Subtype+"."+span.Action,
 			)
 
-			span.End()
-			apm.TransactionFromContext(ctx).End()
+			ender.End()
 		})
 	}
 }
@@ -127,7 +217,7 @@ func TestTrace_logCorrelationTracksTracerActivity(t *testing.T) {
 			recorder, recorderOutput := output.Recorder(level.Trace)
 			l := sypl.New("customapm-test", recorderOutput)
 
-			ctx, span := Trace(
+			ctx, ender := Trace(
 				context.Background(),
 				"converter",
 				"normalize",
@@ -135,6 +225,7 @@ func TestTrace_logCorrelationTracksTracerActivity(t *testing.T) {
 				l,
 				nil,
 			)
+			span := ender.span
 			require.NotNil(t, ctx)
 			require.NotNil(t, span)
 
@@ -152,8 +243,7 @@ func TestTrace_logCorrelationTracksTracerActivity(t *testing.T) {
 				assert.Empty(t, records[0].Fields)
 			}
 
-			span.End()
-			apm.TransactionFromContext(ctx).End()
+			ender.End()
 		})
 	}
 }
@@ -164,11 +254,11 @@ func TestTrace_createsTransactionAndCountsMetric(t *testing.T) {
 	l := logging.Get().New("apm-test")
 	metric := metrics.NewInt("etler.test.apm.running")
 
-	ctx, span := Trace(context.Background(), "test", "unit", status.Runnning, l, metric)
-	require.NotNil(t, span)
+	ctx, ender := Trace(context.Background(), "test", "unit", status.Runnning, l, metric)
+	require.NotNil(t, ender.span)
 	require.NotNil(t, ctx)
 
-	span.End()
+	ender.End()
 
 	assert.Equal(t, int64(1), metric.Value())
 }
@@ -181,10 +271,10 @@ func TestTrace_reusesTransaction_nilLoggerAndMetric(t *testing.T) {
 
 	ctx := apm.ContextWithTransaction(context.Background(), tx)
 
-	tracedCtx, span := Trace(ctx, "test", "unit-reuse", status.Runnning, nil, nil)
-	require.NotNil(t, span)
+	tracedCtx, ender := Trace(ctx, "test", "unit-reuse", status.Runnning, nil, nil)
+	require.NotNil(t, ender.span)
 
-	span.End()
+	ender.End()
 
 	assert.Same(t, tx, apm.TransactionFromContext(tracedCtx),
 		"an existing transaction must be reused")
@@ -212,14 +302,14 @@ func TestTraceError_returnsOriginalAndCounts(t *testing.T) {
 	inner := errors.New("inner-cause")
 	wrapped := customerror.NewFailedToError("outer operation", customerror.WithError(inner))
 
-	ctx, span := Trace(context.Background(), "test", "unit-err", status.Runnning, l, nil)
+	ctx, ender := Trace(context.Background(), "test", "unit-err", status.Runnning, l, nil)
 
 	got := TraceError(ctx, wrapped, l, failed)
 
 	// NOTE: read the outcome BEFORE End() — the span data is released after.
-	assert.Equal(t, string(Failure), span.Outcome)
+	assert.Equal(t, string(Failure), ender.span.Outcome)
 
-	span.End()
+	ender.End()
 
 	assert.Equal(t, wrapped, got, "the original error must be returned, not the unwrapped one")
 	assert.Equal(t, int64(1), failed.Value())

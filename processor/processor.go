@@ -184,7 +184,7 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		p.GetName(),
@@ -192,7 +192,7 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		p.GetLogger(),
 		p.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
 
 	p.GetStatus().Set(status.Runnning.String())
 
