@@ -3,6 +3,7 @@ package converter
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 	"time"
 
@@ -13,6 +14,14 @@ import (
 
 type replacementConverter struct {
 	IConverter[int, int]
+}
+
+type converterWithNilStatus struct {
+	IConverter[int, int]
+}
+
+func (c *converterWithNilStatus) GetStatus() *expvar.String {
+	return nil
 }
 
 // Edge case: a converter without a conversion function is a configuration
@@ -71,6 +80,54 @@ func TestConverter_new_rejectsNilOptionReturn(t *testing.T) {
 			return nil
 		},
 	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// A nil option is invalid input and must be rejected before invocation.
+func TestConverter_new_rejectsNilOptionWithoutPanic(t *testing.T) {
+	var opt Func[int, int]
+
+	var (
+		got IConverter[int, int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-option-function-converter",
+			"rejects a nil option function",
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+			opt,
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// An option replacement must retain non-nil metric getters.
+func TestConverter_new_rejectsNilMetricGetterWithoutPanic(t *testing.T) {
+	var (
+		got IConverter[int, int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-metric-getter-converter",
+			"rejects a nil metric getter",
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+			func(c IConverter[int, int]) IConverter[int, int] {
+				return &converterWithNilStatus{IConverter: c}
+			},
+		)
+	})
 
 	assert.Nil(t, got)
 	assert.Error(t, err)

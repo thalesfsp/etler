@@ -3,6 +3,7 @@ package loader
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 	"time"
 
@@ -13,6 +14,14 @@ import (
 
 type replacementLoader struct {
 	ILoader[string, []int]
+}
+
+type loaderWithNilStatus struct {
+	ILoader[string, []int]
+}
+
+func (l *loaderWithNilStatus) GetStatus() *expvar.String {
+	return nil
 }
 
 // Edge case: a loader without a load function is a configuration error — it
@@ -55,6 +64,54 @@ func TestLoader_new_rejectsNilOptionReturn(t *testing.T) {
 			return nil
 		},
 	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// A nil option is invalid input and must be rejected before invocation.
+func TestLoader_new_rejectsNilOptionWithoutPanic(t *testing.T) {
+	var opt Func[string, []int]
+
+	var (
+		got ILoader[string, []int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-option-function-loader",
+			"rejects a nil option function",
+			func(ctx context.Context, in string) ([]int, error) {
+				return []int{len(in)}, nil
+			},
+			opt,
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// An option replacement must retain non-nil metric getters.
+func TestLoader_new_rejectsNilMetricGetterWithoutPanic(t *testing.T) {
+	var (
+		got ILoader[string, []int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-metric-getter-loader",
+			"rejects a nil metric getter",
+			func(ctx context.Context, in string) ([]int, error) {
+				return []int{len(in)}, nil
+			},
+			func(l ILoader[string, []int]) ILoader[string, []int] {
+				return &loaderWithNilStatus{ILoader: l}
+			},
+		)
+	})
 
 	assert.Nil(t, got)
 	assert.Error(t, err)

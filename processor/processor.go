@@ -2,12 +2,12 @@ package processor
 
 import (
 	"context"
-	"errors"
 	"expvar"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/etler/v4/internal/metrics"
@@ -346,10 +346,18 @@ func New[ProcessingData any](
 
 	// Apply options.
 	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("processor option")
+		}
+
 		p = opt(p)
 		if isNilOptionResult(p) {
-			return nil, errors.New("processor option returned nil")
+			return nil, customerror.NewRequiredError("processor option result")
 		}
+	}
+
+	if err := validateOptionMetrics(p); err != nil {
+		return nil, err
 	}
 
 	// Validation.
@@ -383,5 +391,28 @@ func isNilOptionResult[ProcessingData any](p IProcessor[ProcessingData]) bool {
 		return value.IsNil()
 	default:
 		return false
+	}
+}
+
+// validateOptionMetrics ensures options retain the metrics dereferenced by
+// processor lifecycle observability.
+func validateOptionMetrics[ProcessingData any](p IProcessor[ProcessingData]) error {
+	switch {
+	case p.GetStatus() == nil:
+		return customerror.NewRequiredError("processor status metric")
+	case p.GetCounterCreated() == nil:
+		return customerror.NewRequiredError("processor created counter")
+	case p.GetCounterRunning() == nil:
+		return customerror.NewRequiredError("processor running counter")
+	case p.GetCounterFailed() == nil:
+		return customerror.NewRequiredError("processor failed counter")
+	case p.GetCounterDone() == nil:
+		return customerror.NewRequiredError("processor done counter")
+	case p.GetCounterInterrupted() == nil:
+		return customerror.NewRequiredError("processor interrupted counter")
+	case p.GetDuration() == nil:
+		return customerror.NewRequiredError("processor duration metric")
+	default:
+		return nil
 	}
 }
