@@ -52,6 +52,14 @@ coverage raised to ~99%.
   wrapped in `WithConverterOptions` / `WithProcessorOptions`.
 - **`processor.New("")` returns an error.** `Name` is now required, matching
   every other entity.
+- **Pause state is separate from lifecycle status.** `GetStatus` reports the
+  run — `created` → `running` → `done`/`failed` — and never returns `paused`;
+  `SetPause` no longer writes it at all. `GetPaused` is the only truth about the
+  controller. Previously the two were conflated, which meant a run finishing
+  while paused could have its terminal status hidden until resume, or lost
+  entirely if it was never resumed.
+- **`converters/storage.New` rejects a blank target**, matching
+  `processors/storage`.
 
 ### Performance
 Profiling attributed roughly 85% of all allocations to log messages that were
