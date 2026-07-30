@@ -3,79 +3,62 @@ package csv
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetFieldInfo_reportsNestedCycles(t *testing.T) {
-	t.Run("pointer field", func(t *testing.T) {
-		type pointerCycle struct {
-			Next *pointerCycle
-		}
+type GuardCustomInt int
 
-		fields, err := getFieldInfo(reflect.TypeFor[pointerCycle](), nil, nil)
-
-		assert.Nil(t, fields)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "cyclic CSV output type")
-	})
-
-	t.Run("slice field", func(t *testing.T) {
-		type sliceCycle struct {
-			Children []sliceCycle
-		}
-
-		fields, err := getFieldInfo(reflect.TypeFor[sliceCycle](), nil, nil)
-
-		assert.Nil(t, fields)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "cyclic CSV output type")
-	})
+func (value *GuardCustomInt) UnmarshalCSV(string) error {
+	*value = 1
+	return nil
 }
 
-func TestDecoderHeaderAssignments_escapesCollidingUnmatchedHeader(t *testing.T) {
-	fields := []fieldInfo{
-		{keys: []string{"expected"}},
-		{keys: []string{"\x00etler-unmatched-0"}},
+func TestInspectCSVFields_handlesSupportedFieldShapes(t *testing.T) {
+	type Embedded struct {
+		Value int
 	}
-
-	headers, manualFields := decoderHeaderAssignments(
-		[]string{"no matching field"},
-		[]int{0},
-		fields,
-	)
-
-	assert.Equal(t, []string{"\x00etler-unmatched-0\x00"}, headers)
-	assert.Equal(t, map[int]struct{}{0: {}}, manualFields)
-}
-
-func TestDecodeFieldValue_rejectsInvalidDestinationValue(t *testing.T) {
-	decoded, err := decodeFieldValue("not-a-bool", reflect.TypeFor[bool]())
-
-	assert.False(t, decoded.IsValid())
-	require.Error(t, err)
-	assert.ErrorContains(t, err, `strconv.ParseBool: parsing "not-a-bool": invalid syntax`)
-}
-
-func TestAssignManualFields_rejectsValueTypeMismatch(t *testing.T) {
 	type row struct {
-		Count int
+		Embedded
+		GuardCustomInt
+		Ignored int `csv:"-"`
+		hidden  int
+		Parent  struct {
+			Count uint8
+		}
+		Items []struct {
+			ID int
+		}
+		When time.Time
 	}
 
-	fields, err := getFieldInfo(reflect.TypeFor[row](), nil, nil)
+	fields, err := inspectCSVFields(reflect.TypeFor[row](), nil, false, nil)
 	require.NoError(t, err)
-	require.Len(t, fields, 1)
 
-	assigned, err := assignManualFields(
-		row{},
-		[]string{"not-an-int"},
-		[]int{0},
-		map[int]struct{}{0: {}},
-		fields,
-	)
+	keys := make([]string, 0, len(fields))
+	for _, field := range fields {
+		keys = append(keys, field.keys...)
+	}
+	assert.ElementsMatch(t, []string{"Value", "Parent.Count", "Items", "When"}, keys)
+}
 
-	assert.Nil(t, assigned)
+func TestInspectCSVFields_rejectsCycles(t *testing.T) {
+	fields, err := inspectCSVFields(reflect.TypeFor[PointerCycle](), nil, false, nil)
+	assert.Nil(t, fields)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, `invalid syntax`)
+	assert.ErrorContains(t, err, "cyclic CSV output type")
+
+	fields, err = inspectCSVFields(reflect.TypeFor[SliceCycle](), nil, false, nil)
+	assert.Nil(t, fields)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "cyclic CSV output type")
+}
+
+func TestNumericRangeError_unsignedFractions(t *testing.T) {
+	assert.False(t, numericRangeError("255.9", reflect.TypeFor[uint8]()))
+	assert.True(t, numericRangeError("256.0", reflect.TypeFor[uint8]()))
+	assert.True(t, numericRangeError("-1.0", reflect.TypeFor[uint8]()))
+	assert.False(t, numericRangeError("bad.0", reflect.TypeFor[uint8]()))
 }
