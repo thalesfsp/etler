@@ -4,6 +4,7 @@ import (
 	"context"
 	"expvar"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
@@ -58,6 +59,9 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	Progress        *expvar.Int    `json:"progress"`
 	ProgressPercent *expvar.String `json:"progressPercent"`
 	Status          *expvar.String `json:"status"`
+
+	// mu guards OnFinished.
+	mu sync.RWMutex
 
 	// pause is this pipeline's pause controller. Pausing one pipeline does
 	// not affect any other.
@@ -136,11 +140,17 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetPause(state bool) {
 
 // GetOnFinished returns the `OnFinished` function.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetOnFinished() OnFinished[ProcessedData, ConvertedOut] {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (p *Pipeline[ProcessedData, ConvertedOut]) SetOnFinished(onFinished OnFinished[ProcessedData, ConvertedOut]) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	p.OnFinished = onFinished
 }
 
@@ -190,8 +200,9 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 
 	p.GetDuration().Set(time.Since(now).Milliseconds())
 
-	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, originalTask, tasksOut)
+	onFinished := p.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, p, originalTask, tasksOut)
 	}
 
 	p.GetLogger().PrintWithOptions(
@@ -235,7 +246,8 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 	p.GetProgressPercent().Set(fmt.Sprintf("%d%%", int(percentage)))
 }
 
-// Run the pipeline.
+// Run the pipeline. A pipeline instance must not run concurrently with itself;
+// separate instances run independently.
 func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processingData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.

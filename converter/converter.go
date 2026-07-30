@@ -3,6 +3,7 @@ package converter
 import (
 	"context"
 	"expvar"
+	"sync"
 	"time"
 
 	"github.com/thalesfsp/etler/v3/internal/customapm"
@@ -22,8 +23,8 @@ import (
 // Type of the entity.
 const Type = "converter"
 
-// Convert is a function that converts the data (`in`). It returns the
-// converted data and any errors that occurred during conversion.
+// Convert converts `in`, returning the converted data and any error. It must
+// be safe for concurrent use because stages invoke it from multiple goroutines.
 type Convert[In, Out any] func(ctx context.Context, in In) (out Out, err error)
 
 // Converter definition.
@@ -53,6 +54,9 @@ type Converter[In, Out any] struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	Duration  *expvar.Int    `json:"duration"`
 	Status    *expvar.String `json:"status"`
+
+	// mu guards OnFinished.
+	mu sync.RWMutex
 }
 
 //////
@@ -106,11 +110,17 @@ func (c *Converter[In, Out]) GetStatus() *expvar.String {
 
 // GetOnFinished returns the `OnFinished` function.
 func (c *Converter[In, Out]) GetOnFinished() OnFinished[In, Out] {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	return c.OnFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (c *Converter[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.OnFinished = onFinished
 }
 
@@ -191,8 +201,9 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	c.GetCounterDone().Add(1)
 
 	// Run onEvent callback.
-	if c.GetOnFinished() != nil {
-		c.GetOnFinished()(ctx, c, in, out)
+	onFinished := c.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, c, in, out)
 	}
 
 	// Set duration.
