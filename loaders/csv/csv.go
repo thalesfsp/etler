@@ -12,11 +12,12 @@ import (
 // Consts, vars and types.
 //////
 
-// Name of the loader.
+// Name identifies the CSV loader.
 const Name = "csv"
 
-// CSV definition.
+// CSV loads CSV records from an io.Reader.
 type CSV[Out any] struct {
+	// ILoader provides the loader lifecycle and execution API.
 	loader.ILoader[io.Reader, Out] `json:"loader" validate:"required"`
 }
 
@@ -24,7 +25,7 @@ type CSV[Out any] struct {
 // Factory.
 //////
 
-// New creates a new loader.
+// New creates a CSV loader. Options are applied and validated by loader.New.
 func New[Out any](
 	opts ...loader.Func[io.Reader, []Out],
 ) (*CSV[[]Out], error) {

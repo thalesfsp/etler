@@ -1,2 +1,3 @@
-// Package customapm provides types and methods to deal APM.
+// Package customapm provides tracing and error-reporting helpers for Elastic
+// APM.
 package customapm

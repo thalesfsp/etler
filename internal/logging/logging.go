@@ -25,8 +25,9 @@ var (
 	singletonLogger *Logger
 )
 
-// Logger is the application logger.
+// Logger is the application's shared sypl logger.
 type Logger struct {
+	// Sypl provides the underlying logging implementation.
 	*sypl.Sypl
 }
 
@@ -90,10 +91,11 @@ func isNilLogger(l sypl.ISypl) bool {
 	}
 }
 
-// Get returns a setup logger, or set it up. Default level is `ERROR`.
+// Get returns the process-wide logger, initializing it with Error as its
+// default maximum level on the first call.
 //
-// All messages will be directed to StdOut unless in case of ERROR level, which
-// will be directed to StdErr.
+// Non-error messages admitted by the configured maximum level go to standard
+// output; Fatal and Error messages go to standard error.
 //
 // NOTE: Use `SYPL_LEVEL` env var to overwrite the max level.
 func Get() *Logger {
@@ -127,9 +129,9 @@ func Get() *Logger {
 	return singletonLogger
 }
 
-// ToAPM adds the required APM fields enabling log correlation.
-//
-// NOTE: It expects the `apm.Transaction` to be in the context.
+// ToAPM adds trace, transaction, and current-span IDs from ctx to f. It
+// allocates f when nil and leaves it without correlation fields when ctx has no
+// transaction.
 func ToAPM(ctx context.Context, f fields.Fields) fields.Fields {
 	if f == nil {
 		f = fields.Fields{}

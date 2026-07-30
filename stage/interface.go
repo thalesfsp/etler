@@ -8,19 +8,21 @@ import (
 	"github.com/thalesfsp/etler/v4/task"
 )
 
-// IStage defines what a `Stage` must do.
+// IStage defines stage lifecycle, metrics, and execution. A single
+// implementation must not be run concurrently with itself.
 type IStage[ProcessedData, ConvertedOut any] interface {
 	shared.IMeta
 
 	shared.IMetrics
 
-	// GetProgress returns the `CounterProgress` of the stage.
+	// GetProgress returns the number of processors completed in the current or
+	// most recent run.
 	GetProgress() *expvar.Int
 
-	// GetProgressPercent returns the `ProgressPercent` of the stage.
+	// GetProgressPercent returns the completed-processor percentage.
 	GetProgressPercent() *expvar.String
 
-	// SetProgressPercent sets the `ProgressPercent` of the stage.
+	// SetProgressPercent recalculates the completed-processor percentage.
 	SetProgressPercent()
 
 	// GetOnFinished returns the `OnFinished` function.
@@ -29,7 +31,7 @@ type IStage[ProcessedData, ConvertedOut any] interface {
 	// SetOnFinished sets the `OnFinished` function.
 	SetOnFinished(onFinished OnFinished[ProcessedData, ConvertedOut])
 
-	// Run the stage function.
+	// Run processes and converts a task.
 	Run(
 		ctx context.Context,
 		task task.Task[ProcessedData, ConvertedOut],

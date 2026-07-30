@@ -22,32 +22,31 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies converter entities.
 const Type = "converter"
 
 // Convert converts `in`, returning the converted data and any error. It must
 // be safe for concurrent use because stages invoke it from multiple goroutines.
 type Convert[In, Out any] func(ctx context.Context, in In) (out Out, err error)
 
-// Converter definition.
+// Converter wraps a conversion function with lifecycle observability.
 type Converter[In, Out any] struct {
-	// Description of the processor.
+	// Description describes the converter.
 	Description string `json:"description"`
 
-	// Conversion function.
+	// Func converts one input and must be safe for concurrent use.
 	Func Convert[In, Out] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records converter lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the converter.
+	// Name identifies the converter.
 	Name string `json:"name" validate:"required"`
 
-	// onFinished is the function that is called when a processor finishes its
-	// execution.
+	// onFinished is called after a conversion succeeds.
 	onFinished OnFinished[In, Out] `json:"-"`
 
-	// Metrics.
+	// Lifecycle metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterRunning *expvar.Int `json:"counterRunning"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
@@ -65,12 +64,12 @@ type Converter[In, Out any] struct {
 // Methods.
 //////
 
-// GetDescription returns the `Description` of the processor.
+// GetDescription returns the converter's description.
 func (c *Converter[In, Out]) GetDescription() string {
 	return c.Description
 }
 
-// GetLogger returns the `Logger` of the processor.
+// GetLogger returns the converter's logger.
 func (c *Converter[In, Out]) GetLogger() sypl.ISypl {
 	return c.Logger
 }
@@ -85,22 +84,22 @@ func (c *Converter[In, Out]) GetType() string {
 	return Type
 }
 
-// GetCounterCreated returns the `CounterCreated` of the processor.
+// GetCounterCreated returns the converter's created counter.
 func (c *Converter[In, Out]) GetCounterCreated() *expvar.Int {
 	return c.CounterCreated
 }
 
-// GetCounterRunning returns the `CounterRunning` of the processor.
+// GetCounterRunning returns the converter's running counter.
 func (c *Converter[In, Out]) GetCounterRunning() *expvar.Int {
 	return c.CounterRunning
 }
 
-// GetCounterFailed returns the `CounterFailed` of the processor.
+// GetCounterFailed returns the converter's failed counter.
 func (c *Converter[In, Out]) GetCounterFailed() *expvar.Int {
 	return c.CounterFailed
 }
 
-// GetCounterDone returns the `CounterDone` of the processor.
+// GetCounterDone returns the converter's done counter.
 func (c *Converter[In, Out]) GetCounterDone() *expvar.Int {
 	return c.CounterDone
 }
@@ -126,17 +125,18 @@ func (c *Converter[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
 	c.onFinished = onFinished
 }
 
-// GetCreatedAt returns the created at time.
+// GetCreatedAt returns when the converter was constructed.
 func (c *Converter[In, Out]) GetCreatedAt() time.Time {
 	return c.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the converter.
+// GetDuration returns the most recent successful conversion duration in
+// milliseconds. A failed conversion does not replace it.
 func (c *Converter[In, Out]) GetDuration() *expvar.Int {
 	return c.Duration
 }
 
-// GetMetrics returns the converter's metrics.
+// GetMetrics returns a snapshot of the converter's metrics as strings.
 func (c *Converter[In, Out]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      c.GetCreatedAt().String(),
@@ -149,7 +149,9 @@ func (c *Converter[In, Out]) GetMetrics() map[string]string {
 	}
 }
 
-// Run the conversion function.
+// Run converts one value and updates lifecycle observability. It may be called
+// concurrently; Func and OnFinished callbacks must therefore be concurrency
+// safe.
 func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -235,7 +237,10 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 // Factory.
 //////
 
-// New returns a new converter.
+// New creates a converter. It applies options in order, retains each returned
+// implementation, and then validates the result. Nil options and results are
+// rejected; the final implementation must expose non-nil lifecycle metrics and
+// pass validation. fn must be safe for concurrent use.
 func New[In, Out any](
 	name, description string,
 	fn Convert[In, Out],
@@ -337,7 +342,7 @@ func validateOptionMetrics[In, Out any](c IConverter[In, Out]) error {
 	}
 }
 
-// Default returns a new converter with name and description set to "converter".
+// Default creates a converter whose name and description are Type.
 func Default[In, Out any](
 	fn Convert[In, Out],
 	opts ...Func[In, Out],
@@ -345,8 +350,7 @@ func Default[In, Out any](
 	return New(Type, Type, fn, opts...)
 }
 
-// MustDefault returns a new converter with name and description set to
-// "converter", panicking on error.
+// MustDefault creates a default converter or panics if validation fails.
 func MustDefault[In, Out any](
 	fn Convert[In, Out],
 	opts ...Func[In, Out],

@@ -1,3 +1,4 @@
+// Package task defines the data and metadata passed between pipeline stages.
 package task
 
 import (
@@ -13,31 +14,32 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
 const (
+	// Name identifies the default task logger.
 	Name = "task"
+
+	// Type identifies task entities.
 	Type = "task"
 )
 
 // Task encapsulates the work to be done plus some metadata.
 type Task[ProcessingData, ConvertedData any] struct {
-	// Logger of the job.
+	// Logger records task-related events and is omitted from JSON.
 	Logger sypl.ISypl `json:"-"`
 
-	// ID of the job.
+	// ID is the task's generated UUID.
 	ID string `json:"id,omitempty"`
 
-	// CreatedAt date.
+	// CreatedAt is the task creation time in RFC 3339 format.
 	CreatedAt string `json:"createdAt,omitempty"`
 
-	// Tags of the job, for example, processors adds their name to the tags
-	// indicating that they have processed the job.
+	// Tags contains caller-managed task labels.
 	Tags []string `json:"tags,omitempty"`
 
-	// ProcessingData is the input of the task.
+	// ProcessingData contains the values stages process.
 	ProcessingData []ProcessingData `json:"in" validate:"required"`
 
-	// ConvertedData is the output of the task.
+	// ConvertedData contains the values produced by the most recent stage.
 	ConvertedData []ConvertedData `json:"out"`
 }
 
@@ -45,7 +47,9 @@ type Task[ProcessingData, ConvertedData any] struct {
 // Factory.
 //////
 
-// New returns a new stage.
+// New creates a task for processingData with a UUID, an RFC 3339 creation time,
+// and a non-nil empty ConvertedData slice. A nil processingData slice is
+// rejected; an empty non-nil slice is accepted.
 func New[ProcessingData, ConvertedData any](
 	processingData []ProcessingData,
 ) (Task[ProcessingData, ConvertedData], error) {
@@ -68,7 +72,7 @@ func New[ProcessingData, ConvertedData any](
 	return tsk, nil
 }
 
-// MustNew returns a new stage or panics.
+// MustNew creates a task or panics if processingData is invalid.
 func MustNew[ProcessingData, ConvertedData any](
 	processingData []ProcessingData,
 ) Task[ProcessingData, ConvertedData] {

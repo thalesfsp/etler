@@ -22,32 +22,30 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies loader entities.
 const Type = "loader"
 
-// Load is a function that converts the data (`in`). It returns the
-// converted data and any errors that occurred during conversion.
+// Load retrieves or decodes data from in.
 type Load[In, Out any] func(ctx context.Context, in In) (out Out, err error)
 
-// Loader definition.
+// Loader wraps a load function with lifecycle observability.
 type Loader[In, Out any] struct {
-	// Description of the processor.
+	// Description describes the loader.
 	Description string `json:"description"`
 
-	// Conversion function.
+	// Func loads data from one input.
 	Func Load[In, Out] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records loader lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the stage.
+	// Name identifies the loader.
 	Name string `json:"name" validate:"required"`
 
-	// onFinished is the function that is called when a processor finishes its
-	// execution.
+	// onFinished is called after a load succeeds.
 	onFinished OnFinished[In, Out] `json:"-"`
 
-	// Metrics.
+	// Lifecycle metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterRunning *expvar.Int `json:"counterRunning"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
@@ -65,17 +63,17 @@ type Loader[In, Out any] struct {
 // Methods.
 //////
 
-// GetDescription returns the `Description` of the processor.
+// GetDescription returns the loader's description.
 func (c *Loader[In, Out]) GetDescription() string {
 	return c.Description
 }
 
-// GetLogger returns the `Logger` of the processor.
+// GetLogger returns the loader's logger.
 func (c *Loader[In, Out]) GetLogger() sypl.ISypl {
 	return c.Logger
 }
 
-// GetName returns the `Name` of the stage.
+// GetName returns the loader's name.
 func (c *Loader[In, Out]) GetName() string {
 	return c.Name
 }
@@ -85,22 +83,22 @@ func (c *Loader[In, Out]) GetType() string {
 	return Type
 }
 
-// GetCounterCreated returns the `CounterCreated` of the processor.
+// GetCounterCreated returns the loader's created counter.
 func (c *Loader[In, Out]) GetCounterCreated() *expvar.Int {
 	return c.CounterCreated
 }
 
-// GetCounterRunning returns the `CounterRunning` of the processor.
+// GetCounterRunning returns the loader's running counter.
 func (c *Loader[In, Out]) GetCounterRunning() *expvar.Int {
 	return c.CounterRunning
 }
 
-// GetCounterFailed returns the `CounterFailed` of the processor.
+// GetCounterFailed returns the loader's failed counter.
 func (c *Loader[In, Out]) GetCounterFailed() *expvar.Int {
 	return c.CounterFailed
 }
 
-// GetCounterDone returns the `CounterDone` of the processor.
+// GetCounterDone returns the loader's done counter.
 func (c *Loader[In, Out]) GetCounterDone() *expvar.Int {
 	return c.CounterDone
 }
@@ -126,17 +124,18 @@ func (c *Loader[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
 	c.onFinished = onFinished
 }
 
-// GetCreatedAt returns the created at time.
+// GetCreatedAt returns when the loader was constructed.
 func (c *Loader[In, Out]) GetCreatedAt() time.Time {
 	return c.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the most recent successful load duration in milliseconds.
+// A failed load does not replace it.
 func (c *Loader[In, Out]) GetDuration() *expvar.Int {
 	return c.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns a snapshot of the loader's metrics as strings.
 func (c *Loader[In, Out]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      c.GetCreatedAt().String(),
@@ -149,7 +148,7 @@ func (c *Loader[In, Out]) GetMetrics() map[string]string {
 	}
 }
 
-// Run the conversion function.
+// Run invokes the load function and updates lifecycle observability.
 func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -231,7 +230,10 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 // Factory.
 //////
 
-// New returns a new stage.
+// New creates a loader. It applies options in order, retains each returned
+// implementation, and then validates the result. Nil options and results are
+// rejected; the final implementation must expose non-nil lifecycle metrics and
+// pass validation.
 func New[In, Out any](
 	name, description string,
 	fn Load[In, Out],

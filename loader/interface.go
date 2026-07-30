@@ -6,7 +6,7 @@ import (
 	"github.com/thalesfsp/etler/v4/internal/shared"
 )
 
-// ILoader defines what a `Conveter` must do.
+// ILoader defines loader lifecycle, metrics, and execution.
 type ILoader[In, Out any] interface {
 	shared.IMeta
 
@@ -18,6 +18,6 @@ type ILoader[In, Out any] interface {
 	// SetOnFinished sets the `OnFinished` function.
 	SetOnFinished(onFinished OnFinished[In, Out])
 
-	// Run the stage function.
+	// Run loads data from in.
 	Run(ctx context.Context, in In) (Out, error)
 }

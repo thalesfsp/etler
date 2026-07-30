@@ -22,7 +22,7 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies processor entities.
 const Type = "processor"
 
 // Transform transforms `processingData`, returning the processed data and any
@@ -30,30 +30,31 @@ const Type = "processor"
 // results and async processors receive only a shallow copy.
 type Transform[ProcessedData any] func(ctx context.Context, processingData []ProcessedData) (processedOut []ProcessedData, err error)
 
-// Processor definition.
+// Processor wraps a slice transform with lifecycle observability.
 type Processor[ProcessingData any] struct {
-	// Transform function.
+	// Func transforms a slice without mutating its input or pointed-to values.
 	Func Transform[ProcessingData] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records processor lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the processor.
+	// Name identifies the processor.
 	Name string `json:"name" validate:"required"`
 
-	// Description of the processor.
+	// Description describes the processor.
 	Description string `json:"description"`
 
-	// async if set will run the processor in a go routine.
+	// async tells a stage to run this processor in a goroutine.
 	//
 	// WARN: The output of the processing will not be forwarded!
 	async bool `default:"false"`
 
-	// onFinished is the function that is called when a processor finishes its
-	// execution.
+	// onFinished is called after a processor succeeds.
 	onFinished OnFinished[ProcessingData] `json:"-"`
 
-	// Metrics.
+	// Lifecycle metrics. CounterInterrupted is reserved for interrupted runs;
+	// Run currently records context cancellation as a failure and does not
+	// increment it.
 	CounterCreated     *expvar.Int `json:"counterCreated"`
 	CounterDone        *expvar.Int `json:"counterDone"`
 	CounterFailed      *expvar.Int `json:"counterFailed"`
@@ -138,17 +139,19 @@ func (p *Processor[ProcessingData]) GetType() string {
 	return Type
 }
 
-// GetCreatedAt returns the created at time.
+// GetCreatedAt returns when the processor was constructed.
 func (p *Processor[ProcessingData]) GetCreatedAt() time.Time {
 	return p.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the most recent successful transform duration in
+// milliseconds. A failed transform does not replace it.
 func (p *Processor[ProcessingData]) GetDuration() *expvar.Int {
 	return p.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns selected processor metrics as strings. It does not include
+// CounterInterrupted.
 func (p *Processor[ProcessingData]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      p.GetCreatedAt().String(),
@@ -161,8 +164,9 @@ func (p *Processor[ProcessingData]) GetMetrics() map[string]string {
 	}
 }
 
-// SetAsync if set will run the processor in a go routine. Async processors get
-// a shallow copy, so transforms must not mutate input or pointed-to values.
+// SetAsync marks the processor for goroutine execution by a stage. Async
+// processors receive a shallow copy, so transforms must not mutate input or
+// pointed-to values.
 //
 // WARN: The output of the processing will not be forwarded!
 func (p *Processor[ProcessingData]) SetAsync(async bool) {
@@ -172,7 +176,7 @@ func (p *Processor[ProcessingData]) SetAsync(async bool) {
 	p.async = async
 }
 
-// GetAsync returns if the processor is running in a go routine.
+// GetAsync reports whether a stage should run the processor in a goroutine.
 func (p *Processor[ProcessingData]) GetAsync() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -180,7 +184,9 @@ func (p *Processor[ProcessingData]) GetAsync() bool {
 	return p.async
 }
 
-// Run the transform function.
+// Run waits if its context carries a paused pipeline controller, then invokes
+// the transform and completion callback. A processor running without such a
+// controller does not pause.
 func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []ProcessingData) ([]ProcessingData, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -312,7 +318,11 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 // Factory.
 //////
 
-// New returns a new processor.
+// New creates a processor. It applies options in order, retains each returned
+// implementation, and then validates the result. Nil options and results are
+// rejected; the final implementation must expose non-nil lifecycle metrics and
+// pass validation. The transform must not mutate its input slice or pointed-to
+// values.
 func New[ProcessingData any](
 	name, description string,
 	fn Transform[ProcessingData],

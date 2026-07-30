@@ -1,3 +1,3 @@
-// Package storage contains the storage processor which allows to concurrently
-// store the processed data in a storage system.
+// Package storage provides a processor that concurrently creates input items in
+// a storage backend without changing the processor output.
 package storage

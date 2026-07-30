@@ -20,18 +20,21 @@ import (
 // Consts, vars and types.
 //////
 
-// Name of the processor.
+// Name identifies the storage processor.
 const Name = "storage"
 
 // defaultTarget is the storage target used when WithTarget is not specified.
 const defaultTarget = "etl"
 
-// Storage definition.
+// Storage creates each input item in a storage backend and, on success, returns
+// the input slice unchanged.
 type Storage[In any] struct {
+	// IProcessor provides the processor lifecycle and execution API.
 	processor.IProcessor[In] `json:"processor" validate:"required"`
 }
 
-// IDFunc derives a storage ID from an item.
+// IDFunc derives a storage ID from an item. Returning an error or a blank ID
+// aborts that write.
 type IDFunc[In any] func(ctx context.Context, in In) (string, error)
 
 type config[In any] struct {
@@ -42,15 +45,15 @@ type config[In any] struct {
 	processorOptions []processor.Func[In]
 }
 
-// Func allows storage processor options to be specified.
+// Func configures a storage processor.
 type Func[In any] func(c *config[In])
 
 //////
 // Options.
 //////
 
-// WithIDFunc sets the function used to derive a storage ID from an item. The
-// function is called concurrently and must be safe for concurrent use.
+// WithIDFunc sets the first and exclusive source of storage IDs. The function
+// is called concurrently and must be safe for concurrent use.
 func WithIDFunc[In any](idFunc IDFunc[In]) Func[In] {
 	return func(c *config[In]) {
 		c.idFunc = idFunc
@@ -58,14 +61,18 @@ func WithIDFunc[In any](idFunc IDFunc[In]) Func[In] {
 	}
 }
 
-// WithIDFieldName sets the struct field read for an item's storage ID.
+// WithIDFieldName sets the exported struct field read for an item's storage ID.
+// String, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, and
+// uint64 fields are supported after pointer and interface dereferencing;
+// fmt.Stringer is not used implicitly.
 func WithIDFieldName[In any](idFieldName string) Func[In] {
 	return func(c *config[In]) {
 		c.idFieldName = idFieldName
 	}
 }
 
-// WithTarget sets the storage target used by Create. The default is "etl".
+// WithTarget sets the storage target used by Create. The default is "etl";
+// New rejects a blank target.
 func WithTarget[In any](target string) Func[In] {
 	return func(c *config[In]) {
 		c.target = target
@@ -115,13 +122,16 @@ func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, erro
 // Factory.
 //////
 
-// New creates a new Storage processor.
+// New creates a storage processor. For each item it resolves the ID from
+// WithIDFunc, then the configured or default ID/Id field, then a SHA-256 key
+// derived from the item's JSON. It prepends idPrefix before calling Create.
 //
-// IDs are derived deterministically from each item, making writes idempotent
-// when callers retry the same item.
+// The built-in field and content paths produce a stable key for stable input; a
+// custom IDFunc determines its own stability. Whether repeated writes are
+// idempotent depends on the storage backend's Create implementation.
 //
-// NOTE: Mininum concurrency is 1.
-// NOTE: idPrefix example: "news-"
+// NOTE: Concurrency values below 1 are treated as 1.
+// NOTE: An idPrefix can namespace keys, for example "news-".
 func New[In any](
 	s storage.IStorage,
 	concurrency int,
@@ -246,7 +256,7 @@ func New[In any](
 	return str, nil
 }
 
-// Must returns a new processor or panics if an error occurs.
+// Must creates a storage processor or panics if validation fails.
 func Must[In any](
 	s storage.IStorage,
 	concurrency int,
