@@ -64,16 +64,12 @@ func TestLoad_malformedCSV_returnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestLoad_invalidInteger_returnsParseError(t *testing.T) {
+func TestLoad_invalidInteger_returnsStrictSyntaxError(t *testing.T) {
 	out, err := Load[[]auditRow](strings.NewReader("Name,Age\nalice,abc\n"))
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, `strconv.ParseInt: parsing "abc": invalid syntax`)
-
-	var parseErr *csv.ParseError
-	require.ErrorAs(t, err, &parseErr)
-	assert.Equal(t, 2, parseErr.Line)
-	assert.Equal(t, 2, parseErr.Column)
+	assert.ErrorContains(t, err, `value "abc" in column "Age"`)
+	assert.ErrorContains(t, err, "strict decimal syntax")
 }
 
 func TestLoad_nonSliceOutput_returnsErrorWithoutPanic(t *testing.T) {
@@ -183,6 +179,14 @@ func TestLoad_readerFailure_propagatesError(t *testing.T) {
 	)
 
 	out, err := Load[[]auditTextRow](in)
+	assert.Nil(t, out)
+	assert.ErrorIs(t, err, errRead)
+}
+
+func TestLoad_readerFailureBeforeHeader_propagatesError(t *testing.T) {
+	errRead := errors.New("reader failed before header")
+
+	out, err := Load[[]auditTextRow](errorReader{err: errRead})
 	assert.Nil(t, out)
 	assert.ErrorIs(t, err, errRead)
 }
