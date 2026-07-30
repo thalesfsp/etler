@@ -34,7 +34,8 @@ coverage raised to ~99%.
   *converter* already used for writing. Reading and writing are therefore
   symmetric, and plain `int`, `float64` and `bool` struct fields now work.
   Structs are mapped by `csv:"..."` tag instead of `json:"..."` (untagged
-  fields still match their header case-insensitively), and the
+  top-level fields still match their header case-insensitively; nested struct
+  fields are matched by their synthesized dotted key, case-sensitively), and the
   `json:"age,string"` workaround is no longer needed. A value that does not fit
   its destination field is now an error instead of a silent wraparound. The
   loader also no longer strips tab characters from values, which previously
@@ -44,7 +45,9 @@ coverage raised to ~99%.
   than inserting under a new one. Whether that overwrites or is rejected is the
   backend's `Create` semantics — etler guarantees the key, not the upsert. Two
   structurally identical items therefore share an id; `WithIDFunc` and
-  `WithIDFieldName` are available when they must be distinct. The storage
+  `WithIDFieldName` are available when they must be distinct. Stability assumes
+  the item's own extension points are deterministic — a `fmt.Stringer` id or a
+  custom `MarshalJSON` that varies between calls will produce a varying id. The storage
   constructors also take their own option type now, so entity options must be
   wrapped in `WithConverterOptions` / `WithProcessorOptions`.
 - **`processor.New("")` returns an error.** `Name` is now required, matching
@@ -68,12 +71,12 @@ committed at [`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the
 
 | Benchmark | Time | Memory | Allocations |
 | --- | --- | --- | --- |
-| Pipeline, 2 stages × 1k items | 19.0 → 5.7 ms (−70%) | 30.0 → 6.3 MB (−79%) | 542k → 112k (−79%) |
-| Stage, 1k items | 9.7 → 3.0 ms (−69%) | 14.9 → 3.1 MB (−79%) | 271k → 56k (−79%) |
-| Stage, single item | 145 → 10.5 µs (−93%) | 68 → 8 KB (−88%) | 762 → 93 (−88%) |
-| Processor, 1k items | 71.6 → 2.7 µs (−96%) | 44 → 11 KB (−74%) | 236 → 13 (−94%) |
-| Converter, single call | 58.5 → 2.0 µs (−97%) | 36 → 3 KB (−91%) | 235 → 12 (−95%) |
-| CSV loader, 1k rows | 1.09 → 0.31 ms (−71%) | 802 → 401 KB (−50%) | 18.9k → 11.1k (−41%) |
+| Pipeline, 2 stages × 1k items | 19.0 → 5.7 ms (−70%) | 30.0 → 6.3 MiB (−79%) | 542k → 112k (−79%) |
+| Stage, 1k items | 9.7 → 3.0 ms (−69%) | 14.9 → 3.1 MiB (−79%) | 271k → 56k (−79%) |
+| Stage, single item | 145 → 10.5 µs (−93%) | 68 → 8 KiB (−88%) | 762 → 93 (−88%) |
+| Processor, 1k items | 71.6 → 2.7 µs (−96%) | 44 → 11 KiB (−74%) | 236 → 13 (−94%) |
+| Converter, single call | 58.5 → 2.0 µs (−97%) | 36 → 3 KiB (−91%) | 235 → 12 (−95%) |
+| CSV loader, 1k rows | 1.09 → 0.31 ms (−71%) | 802 → 401 KiB (−50%) | 18.9k → 11.1k (−41%) |
 
 Every figure above is the median of the three runs in the committed files, and
 can be recomputed from them.
@@ -128,10 +131,12 @@ must not mutate their input slice or the values it points to, and a single
 pipeline or stage instance must not be `Run` concurrently with itself.
 
 ### Added
-- **13 runnable examples** across the public API, verified by `go test` so they
-  cannot silently rot — including an end-to-end one at the package root. Browse
-  them on [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
-  `go test -run Example ./...`.
+- **12 new runnable examples** (13 in total) across `etler`, `pipeline`,
+  `stage`, `processor`, `converter`, `loader`, `loaders/csv`, `converters/csv`
+  and `converters/passthru`, verified by `go test` so they cannot silently rot —
+  including an end-to-end one at the package root. Browse them on
+  [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
+  `go test -run Example ./...`. The storage packages and `task` have none yet.
 - A benchmark suite isolating per-item cost from fixed per-call cost.
 - Ten end-to-end scenarios, including a regression guard for the zero-value
   data-loss bug, async failure, pause/resume, and context cancellation.

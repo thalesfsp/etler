@@ -27,7 +27,7 @@ ETL pipelines enable organizations to:
 
 - Comprehensive Observability: ETLer prioritizes observability and provides built-in features for monitoring, logging, and tracing pipeline execution. The framework exposes pipeline/stage/processor metrics using Golang's built-in, battle-tested `expvar` package (global registration is opt-in via `ETLER_METRICS_PUBLISH=true`), allowing easy integration with monitoring systems. Structured logging is powered by the `sypl` package, providing rich context and consistent log levels across the pipeline. Distributed tracing is supported through the `customapm` package which is powered under-the-hood by Elastic APM, enabling deep insights into pipeline performance and behavior.
 
-- Error Handling and Resilience: ETLer includes robust error handling mechanisms to ensure pipeline resilience and fault tolerance. Errors that occur during pipeline execution are propagated and handled gracefully, with detailed error messages and proper error reporting. Storage writes derive a stable id from each item, so a retry does not create a second record on a backend whose `Create` upserts.
+- Error Handling and Resilience: ETLer includes robust error handling mechanisms to ensure pipeline resilience and fault tolerance. Errors that occur during pipeline execution are propagated and handled gracefully, with detailed error messages and proper error reporting. Storage writes derive a stable id from each item, so a retry reuses the same key rather than inserting a second record — on a backend whose `Create` upserts, that means no duplicate.
 
 - Testing and Documentation: ETLer emphasizes the importance of testing and documentation. The framework includes a comprehensive suite of unit tests to ensure the reliability and correctness of pipeline components. The codebase is documented, with comments explaining the purpose and functionality of components facilitating adoption, and enable developers to effectively leverage the framework.
 
@@ -97,7 +97,7 @@ func main() {
 }
 ```
 
-Every package ships runnable examples — see them on
+Most packages ship runnable examples — see them on
 [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
 `go test -run Example ./...`.
 
@@ -125,8 +125,9 @@ requires Go 1.25. Beyond that:
   `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
   signatures are unchanged.
 - The CSV loader now maps struct fields by `csv:"..."` tag instead of
-  `json:"..."`, matching the CSV converter. Untagged fields still match their
-  header case-insensitively, as before. Plain `int`, `float64` and `bool`
+  `json:"..."`, matching the CSV converter. Untagged top-level fields still
+  match their header case-insensitively, as before; nested struct fields are
+  matched by their synthesized dotted key (`Meta.Name`), case-sensitively. Plain `int`, `float64` and `bool`
   fields now decode correctly — remove the old `json:"age,string"` workaround —
   and a value that does not fit its field is now an error rather than a silent
   wraparound.
@@ -137,7 +138,9 @@ requires Go 1.25. Beyond that:
 - Storage writes derive a **stable** id from each item instead of a fresh UUID
   per attempt, so a retry reuses the same key. Whether that overwrites or is
   rejected is the backend's `Create` semantics — etler guarantees the key, not
-  the upsert. Two structurally identical items therefore share an id; pass
+  the upsert. Stability assumes your item's own extension points are
+  deterministic: a `fmt.Stringer` id or a custom `MarshalJSON` that varies
+  between calls will produce a varying id. Two structurally identical items therefore share an id; pass
   `WithIDFunc` or `WithIDFieldName` if they must be distinct.
 - `processor.New("")` returns an error; a name is required.
 
