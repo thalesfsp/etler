@@ -31,6 +31,8 @@ func TestProcessor_metadataAndAsyncFlag(t *testing.T) {
 	m := p.GetMetrics()
 	assert.Contains(t, m, "status")
 	assert.Contains(t, m, "counterFailed")
+	assert.Contains(t, m, "counterInterrupted",
+		"GetMetrics must expose the interrupted counter")
 
 	assert.True(t, p.GetAsync(), "WithAsync(true) must set the async flag")
 

@@ -25,10 +25,12 @@ type IProcessor[ProcessingData any] interface {
 	// SetOnFinished sets the `OnFinished` function.
 	SetOnFinished(onFinished OnFinished[ProcessingData])
 
-	// GetCounterInterrupted returns the interrupted counter.
+	// GetCounterInterrupted returns the counter for paused runs interrupted by
+	// context cancellation or deadline.
 	GetCounterInterrupted() *expvar.Int
 
-	// SetAsync controls whether a stage runs the processor in a goroutine.
+	// SetAsync controls whether a stage runs the processor in a goroutine. It
+	// changes scheduling only; Run still records lifecycle status and counters.
 	//
 	// WARN: The output of the processing will not be forwarded!
 	SetAsync(async bool)
@@ -37,5 +39,7 @@ type IProcessor[ProcessingData any] interface {
 	GetAsync() bool
 
 	// Run transforms processingData without mutating it or pointed-to values.
+	// It records context termination while paused as an interruption and
+	// transform errors as failures.
 	Run(ctx context.Context, processingData []ProcessingData) (processedOut []ProcessingData, err error)
 }

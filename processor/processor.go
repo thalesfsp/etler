@@ -52,9 +52,8 @@ type Processor[ProcessingData any] struct {
 	// onFinished is called after a processor succeeds.
 	onFinished OnFinished[ProcessingData] `json:"-"`
 
-	// Lifecycle metrics. CounterInterrupted is reserved for interrupted runs;
-	// Run currently records context cancellation as a failure and does not
-	// increment it.
+	// Lifecycle metrics. CounterInterrupted counts paused runs whose wait ends
+	// because their context is cancelled or reaches its deadline.
 	CounterCreated     *expvar.Int `json:"counterCreated"`
 	CounterDone        *expvar.Int `json:"counterDone"`
 	CounterFailed      *expvar.Int `json:"counterFailed"`
@@ -103,7 +102,8 @@ func (p *Processor[ProcessingData]) GetCounterFailed() *expvar.Int {
 	return p.CounterFailed
 }
 
-// GetCounterInterrupted returns the `CounterInterrupted` metric.
+// GetCounterInterrupted returns the counter for paused runs interrupted by
+// context cancellation or deadline.
 func (p *Processor[ProcessingData]) GetCounterInterrupted() *expvar.Int {
 	return p.CounterInterrupted
 }
@@ -150,21 +150,22 @@ func (p *Processor[ProcessingData]) GetDuration() *expvar.Int {
 	return p.Duration
 }
 
-// GetMetrics returns selected processor metrics as strings. It does not include
-// CounterInterrupted.
+// GetMetrics returns selected processor metrics as strings.
 func (p *Processor[ProcessingData]) GetMetrics() map[string]string {
 	return map[string]string{
-		"createdAt":      p.GetCreatedAt().String(),
-		"counterCreated": p.GetCounterCreated().String(),
-		"counterDone":    p.GetCounterDone().String(),
-		"counterFailed":  p.GetCounterFailed().String(),
-		"counterRunning": p.GetCounterRunning().String(),
-		"duration":       p.GetDuration().String(),
-		"status":         p.GetStatus().String(),
+		"createdAt":          p.GetCreatedAt().String(),
+		"counterCreated":     p.GetCounterCreated().String(),
+		"counterDone":        p.GetCounterDone().String(),
+		"counterFailed":      p.GetCounterFailed().String(),
+		"counterInterrupted": p.GetCounterInterrupted().String(),
+		"counterRunning":     p.GetCounterRunning().String(),
+		"duration":           p.GetDuration().String(),
+		"status":             p.GetStatus().String(),
 	}
 }
 
 // SetAsync marks the processor for goroutine execution by a stage. Async
+// scheduling does not change Run's lifecycle status or counters. Async
 // processors receive a shallow copy, so transforms must not mutate input or
 // pointed-to values.
 //
@@ -186,7 +187,8 @@ func (p *Processor[ProcessingData]) GetAsync() bool {
 
 // Run waits if its context carries a paused pipeline controller, then invokes
 // the transform and completion callback. A processor running without such a
-// controller does not pause.
+// controller does not pause. Context termination while waiting is recorded as
+// an interruption; transform errors are recorded as failures.
 func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []ProcessingData) ([]ProcessingData, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -236,14 +238,17 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
 
-			return nil, shared.OnErrorHandler(
+			p.GetStatus().Set(status.Interrupted.String())
+
+			return nil, customapm.TraceError(
 				tracedContext,
-				p,
+				customerror.NewFailedToError(
+					"process",
+					customerror.WithError(err),
+					customerror.WithField(Type, p.GetName()),
+				),
 				p.GetLogger(),
-				err,
-				"process",
-				Type,
-				p.GetName(),
+				p.GetCounterInterrupted(),
 			)
 		}
 
