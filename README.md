@@ -178,12 +178,13 @@ Then make each applicable migration below:
   are judged identically on both paths. That is not a round-trip guarantee:
   gocsv's marshal and unmarshal interfaces are directional, so a field
   implementing only `MarshalCSV` writes fine and fails to load back. Implement
-  both halves for any type you intend to round-trip. They also differ in
-  mechanics: writing calls
-  `gocsv.MarshalString` through gocsv's writer factory, while loading strips one
-  leading UTF-8 BOM and constructs `encoding/csv.NewReader` directly, so a
-  host-configured gocsv reader factory does not affect the loader. The loader does use gocsv's tag name, tag separator, field
-  combiner, header normalizer, and duplicate-header settings;
+  both halves for any type you intend to round-trip.
+
+  They also differ in mechanics: writing calls `gocsv.MarshalString` through
+  gocsv's writer factory, while loading strips one leading UTF-8 BOM and
+  constructs `encoding/csv.NewReader` directly, so a host-configured gocsv reader
+  factory does not affect the loader. The loader does use gocsv's tag name, tag
+  separator, field combiner, header normalizer, and duplicate-header settings;
   `gocsv.FailIfUnmatchedStructTags` does not affect it.
 
   **Cyclic types are rejected on both paths, before gocsv sees them.** A
@@ -194,13 +195,14 @@ Then make each applicable migration below:
   rather than at conversion, and would otherwise die even on an empty input
   slice, because the recursion is driven by the type, not the values.
 
-  **`csv[]` expansion is supported where gocsv handles it, on both paths.** A direct `[]T` field
-  with a positive count, or a `[N]T` field whose count is at most `N`, decodes
-  normally. Three forms are rejected: the tag on a pointer-wrapped field, which
-  gocsv ignores entirely; a count that is non-numeric or non-positive, which
-  expands to nothing; and a count larger than the array it applies to, which
-  fails inside gocsv. The first two discard columns with no error. The message
-  says which applies.
+  **`csv[]` expansion is supported where gocsv handles it, on both paths.** A
+  direct `[]T` field with a positive count, or a `[N]T` field whose count is at
+  most `N`, decodes normally. Four forms are rejected: the tag on an anonymous
+  field, which gocsv drops whole so the tag cannot take effect; the tag on a
+  pointer-wrapped field, which gocsv ignores entirely; a count that is
+  non-numeric or non-positive, which expands to nothing; and a count larger than
+  the array it applies to, which fails inside gocsv. The first two discard
+  columns with no error. The message says which applies.
 
   **Configure gocsv's package-level settings before a type is used for the first
   time.** gocsv caches each row type's field mapping keyed only by the type, with

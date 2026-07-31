@@ -34,8 +34,8 @@ var validateCSVOutputType = csvshape.ValidateOutput
 // until the process dies -- of a stack overflow or of memory exhaustion,
 // depending on the shape, and neither recoverable -- and lossy csv[]
 // expansion forms. Direct slice or array fields with a positive csv[] count are
-// supported; pointer-wrapped fields and invalid counts are rejected because
-// gocsv silently discards their columns. Other type incompatibilities are
+// supported; anonymous fields, pointer-wrapped fields, and invalid counts are
+// rejected because gocsv silently discards their columns. Other type incompatibilities are
 // delegated to gocsv; any panic is returned as an error naming the output type
 // and recovered value. That guard also covers a panic raised by a caller-supplied
 // UnmarshalCSV or UnmarshalText, which is reported the same way.

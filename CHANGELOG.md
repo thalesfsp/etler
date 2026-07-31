@@ -54,7 +54,8 @@ brings statement coverage to 99.4%.
   characters, which previously corrupted legitimately quoted content such as
   `"a\tb"`. gocsv's `csv[]` slice expansion is supported where gocsv handles it:
   a direct `[]T` field with a positive count, or a `[N]T` field whose count is at
-  most `N`, decodes normally. Three forms are rejected — the tag on a
+  most `N`, decodes normally. Four forms are rejected — the tag on an anonymous
+  field, which gocsv drops whole so the tag never takes effect; the tag on a
   pointer-wrapped field, which gocsv ignores outright; a count that is
   non-numeric or non-positive, which expands to nothing; and a count larger than
   its array, which fails inside gocsv. The first two discard columns with no
@@ -82,7 +83,7 @@ brings statement coverage to 99.4%.
   honouring the tag could let a cyclic type through into a crash.
 
   Both paths run the same *shape* validation: valid `csv[]` expansion works on
-  both, and the three lossy forms are rejected on both. They were briefly allowed
+  both, and the four lossy forms are rejected on both. They were briefly allowed
   to diverge, and the converter then emitted a phantom trailing column for an
   over-count array and JSON-dumped a pointer-wrapped one into a single column,
   with no error. This is not a round-trip guarantee — gocsv's marshal and
