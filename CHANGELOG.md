@@ -74,15 +74,21 @@ brings statement coverage to 99.4%.
   make gocsv recurse until the process dies. Depending on the shape that is a
   stack overflow or memory exhaustion, and neither is recoverable.
   The walk is a deliberate *superset* of gocsv's own traversal — it may reject a
-  type gocsv could technically load, but it can never miss one that kills the
-  process. A field whose type implements `MarshalCSV`, `MarshalText`,
+  type gocsv could technically load, but it can never miss a cycle that kills the
+  process. It does not bound a `csv[]` count on a slice, where the field count is
+  the developer's own tag rather than input data: gocsv materialises that many
+  entries eagerly, so an absurd count exhausts memory. Array counts are bounded
+  by the array. A field whose type implements `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed. A type implementing only `encoding.TextUnmarshaler` is
   **not** a leaf, because gocsv descends into it. Anonymous struct fields are
   traversed; anonymous slice and array fields are not, because gocsv drops them.
-  A `csv:"-"` tag does not exempt a field: gocsv applies its process-wide header
-  normalizer before deciding to skip, and that normalizer cannot be read back, so
-  honouring the tag could let a cyclic type through into a crash.
+  A `csv:"-"` tag does not exempt a field from either check: gocsv applies its
+  process-wide header normalizer before deciding to skip, and that normalizer
+  cannot be read back, so honouring the tag could let a cyclic type through into a
+  crash. The same reasoning applies to the `csv[]` check, which therefore also
+  ignores `-` and can reject a `-`-tagged field gocsv would have dropped
+  harmlessly.
 
   Both paths run the same *shape* validation: valid `csv[]` expansion works on
   both, and the four lossy forms are rejected on both. They were briefly allowed
@@ -120,12 +126,14 @@ brings statement coverage to 99.4%.
   `WithProcessorOptions`.
 - **`processor.New("")` returns an error.** `Name` is now required, matching
   every other entity.
-- **Pause state is separate from lifecycle status.** `GetStatus` reports the
-  run — `created` → `running` → `done`/`failed` — and never returns `paused`;
+- **Pause state is separate from lifecycle status.** `Pipeline.GetStatus` reports
+  the run — `created` → `running` → `done`/`failed` — and never returns `paused`;
   `SetPause` changes only the controller and `GetPaused` reports that controller.
   A paused controller and a running lifecycle are a valid combination while a
   new run waits before its next processor. Terminal status remains visible even
-  when the controller stays paused.
+  when the controller stays paused. This is about the pipeline's own status:
+  `Processor.GetStatus` still reports `paused` while that processor waits, and
+  `interrupted` if its context ends during the wait.
 - **`converters/storage.New` rejects a blank target**, matching
   `processors/storage`.
 
@@ -227,8 +235,9 @@ removed, as listed under breaking changes.
   under that entity name, and a later valid entity with the same name inherited
   the leaked objects — a retry loop over a bad config grew the registry without
   bound. All five entities now validate before minting metrics, across twelve
-  rejection paths: an empty required collection, a nil or typed-nil element, a
-  nil converter, a nil function, and a nil option. One case is not preflightable:
+  rejection path but one: an empty required collection, a nil or typed-nil
+  element, a nil converter, a nil function, a nil option, and a blank name. The
+  remaining case is not preflightable:
   an option that itself returns a nil or structurally invalid entity can only be
   detected by executing it, which requires the entity — and its metrics — to
   already exist.

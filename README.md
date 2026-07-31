@@ -216,8 +216,11 @@ Then make each applicable migration below:
   process-wide startup configuration.
 
   Cycle rejection walks a deliberate *superset* of gocsv's own traversal: it may
-  reject a type gocsv could technically load, but it can never miss one that
-  kills the process. A field type implementing `MarshalCSV`, `MarshalText`,
+  reject a type gocsv could technically load, but it can never miss a cycle that
+  kills the process. It does not bound a `csv[]` count on a slice — that count is
+  your own tag rather than input data, and gocsv materialises that many entries
+  eagerly, so an absurd count exhausts memory. Array counts are bounded by the
+  array. A field type implementing `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed, so `**T` is a leaf. A type implementing only
   `encoding.TextUnmarshaler` is **not** a leaf, because gocsv descends into it.
@@ -264,11 +267,13 @@ Then make each applicable migration below:
   separate pipeline instances and do not share a `Stage` instance between them.
   `OnFinished` runs after serialization is released, so callbacks can still
   overlap.
-- **Read pause state separately from lifecycle status.** `GetStatus` reports
-  `created`, `running`, `done`, or `failed` and never reports `paused`.
+- **Read pause state separately from lifecycle status.** `Pipeline.GetStatus`
+  reports `created`, `running`, `done`, or `failed` and never reports `paused`.
   `GetPaused` is the pause-controller state, and `SetPause` changes only that
   controller. A paused pipeline can legitimately report a running lifecycle
-  while its next processor waits for resume.
+  while its next processor waits for resume. This applies to the pipeline's own
+  status only: `Processor.GetStatus` does report `paused` while that processor
+  waits, and `interrupted` if its context ends during the wait.
 - **Pass a nonblank converter storage target.**
   `converters/storage.New` now rejects an empty or whitespace-only target,
   matching the processor storage implementation.
