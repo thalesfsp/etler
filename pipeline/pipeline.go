@@ -271,18 +271,6 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) runOnFinished(
 	}
 }
 
-// UpdateObservability marks a run done, records and logs its metrics, and
-// invokes the callback. tasksOut contains one result per stage in stage order.
-func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
-	ctx context.Context,
-	now time.Time,
-	originalTask task.Task[ProcessedData, ConvertedOut],
-	tasksOut []task.Task[ProcessedData, ConvertedOut],
-) {
-	p.updateCompletionObservability(now)
-	p.runOnFinished(ctx, originalTask, tasksOut)
-}
-
 // GetProgress returns the number of stages completed in the current or most
 // recent run.
 func (p *Pipeline[ProcessedData, ConvertedOut]) GetProgress() *expvar.Int {
