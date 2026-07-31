@@ -50,6 +50,9 @@ func New[In any](
 			if err := tracedContext.Err(); err != nil {
 				return "", err
 			}
+			if err := csvshape.ValidateOutput(rowType); err != nil {
+				return "", err
+			}
 
 			return callGocsv(reflect.TypeFor[[]In](), func() (string, error) {
 				return gocsv.MarshalString(in)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gocarina/gocsv"
 	"github.com/stretchr/testify/require"
 	loadercsv "github.com/thalesfsp/etler/v4/loaders/csv"
 )
@@ -41,6 +42,27 @@ type zeroCount struct {
 type validDirectCount struct {
 	ID   string
 	Vals [3]string `csv:"vals" csv[]:"2"`
+}
+
+type LatePtr struct {
+	Values *[]int `alternate:"values" alternate[]:"2"`
+}
+
+type lateNonNumericCount struct {
+	Values []int `alternate:"values" alternate[]:"many"`
+}
+
+type lateNonPositiveCount struct {
+	Values []int `alternate:"values" alternate[]:"0"`
+}
+
+type validAfterTagNameSwitch struct {
+	Name   string `csv:"csv_name" alternate:"name"`
+	Values [2]int `csv:"csv_values" csv[]:"2" alternate:"values" alternate[]:"2"`
+}
+
+type repeatedRunRow struct {
+	Name string `csv:"name"`
 }
 
 func converterValidationError[Row any]() error {
@@ -92,6 +114,100 @@ func TestCSV_run_keepsValidDirectArrayExpansion(t *testing.T) {
 	out, err := csvConverter.Run(context.Background(), []validDirectCount{{ID: "r1", Vals: [3]string{"a", "b", "c"}}})
 	require.NoError(t, err)
 	require.Equal(t, "ID,vals[0],vals[1]\nr1,a,b\n", out)
+}
+
+func TestCSV_run_revalidatesPointerWrappedExpansionAfterTagNameSwitch(t *testing.T) {
+	originalTagName := gocsv.TagName
+	defer func() { gocsv.TagName = originalTagName }()
+
+	gocsv.TagName = "csv"
+	csvConverter, err := New[LatePtr]()
+	require.NoError(t, err)
+
+	gocsv.TagName = "alternate"
+	values := []int{7, 8}
+	out, err := csvConverter.Run(context.Background(), []LatePtr{{Values: &values}})
+
+	require.Empty(t, out)
+	require.EqualError(
+		t,
+		err,
+		"failed to process. Original Error: invalid CSV output type csv.LatePtr uses unsupported csv[] slice expansion on field Values: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field. Fields: converter=csv",
+	)
+}
+
+func TestCSV_run_revalidatesInvalidCountAfterTagNameSwitch(t *testing.T) {
+	t.Run("non-numeric", func(t *testing.T) {
+		originalTagName := gocsv.TagName
+		defer func() { gocsv.TagName = originalTagName }()
+
+		gocsv.TagName = "csv"
+		csvConverter, err := New[lateNonNumericCount]()
+		require.NoError(t, err)
+
+		gocsv.TagName = "alternate"
+		out, err := csvConverter.Run(context.Background(), []lateNonNumericCount{{Values: []int{7, 8}}})
+
+		require.Empty(t, out)
+		require.EqualError(
+			t,
+			err,
+			`failed to process. Original Error: invalid CSV output type csv.lateNonNumericCount uses unsupported csv[] slice expansion on field Values: count "many" is non-numeric or non-positive; use a positive integer count. Fields: converter=csv`,
+		)
+	})
+
+	t.Run("non-positive", func(t *testing.T) {
+		originalTagName := gocsv.TagName
+		defer func() { gocsv.TagName = originalTagName }()
+
+		gocsv.TagName = "csv"
+		csvConverter, err := New[lateNonPositiveCount]()
+		require.NoError(t, err)
+
+		gocsv.TagName = "alternate"
+		out, err := csvConverter.Run(context.Background(), []lateNonPositiveCount{{Values: []int{7, 8}}})
+
+		require.Empty(t, out)
+		require.EqualError(
+			t,
+			err,
+			`failed to process. Original Error: invalid CSV output type csv.lateNonPositiveCount uses unsupported csv[] slice expansion on field Values: count "0" is non-numeric or non-positive; use a positive integer count. Fields: converter=csv`,
+		)
+	})
+}
+
+func TestCSV_run_keepsValidTypeAfterTagNameSwitch(t *testing.T) {
+	originalTagName := gocsv.TagName
+	defer func() { gocsv.TagName = originalTagName }()
+
+	gocsv.TagName = "csv"
+	csvConverter, err := New[validAfterTagNameSwitch]()
+	require.NoError(t, err)
+
+	gocsv.TagName = "alternate"
+	out, err := csvConverter.Run(context.Background(), []validAfterTagNameSwitch{{Name: "Ada", Values: [2]int{7, 8}}})
+
+	require.NoError(t, err)
+	require.Equal(t, "name,values[0],values[1]\nAda,7,8\n", out)
+}
+
+func TestNew_stillRejectsCyclicRowBeforeConversion(t *testing.T) {
+	csvConverter, err := New[cyclicConverterNode]()
+
+	require.Nil(t, csvConverter)
+	require.EqualError(t, err, "invalid cyclic CSV output type csv.cyclicConverterNode")
+}
+
+func TestCSV_run_revalidatesRepeatedValidRuns(t *testing.T) {
+	csvConverter, err := New[repeatedRunRow]()
+	require.NoError(t, err)
+
+	for range 3 {
+		out, err := csvConverter.Run(context.Background(), []repeatedRunRow{{Name: "Ada"}})
+
+		require.NoError(t, err)
+		require.Equal(t, "name\nAda\n", out)
+	}
 }
 
 func TestConverterAndLoader_agreeOnCSVExpansionValidation(t *testing.T) {
