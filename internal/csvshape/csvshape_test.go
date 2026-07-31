@@ -2,10 +2,12 @@ package csvshape
 
 import (
 	"encoding"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gocarina/gocsv"
@@ -36,7 +38,38 @@ type soloQHolder struct {
 	Q cacheQ
 }
 
-func TestValidateOutput_cyclicErrorNamesRequestedTypeInBothValidationOrders(t *testing.T) {
+type Scores []int
+
+type AnonExp struct {
+	Scores `csv:"scores" csv[]:"2"`
+	Name   string `csv:"name"`
+}
+
+type NamedExp struct {
+	Scores Scores `csv:"scores" csv[]:"2"`
+	Name   string `csv:"name"`
+}
+
+type StructScore struct {
+	Value int `csv:"value"`
+}
+
+type StructScores [2]StructScore
+
+type AnonStructExp struct {
+	StructScores `csv:"scores" csv[]:"2"`
+	Name         string `csv:"name"`
+}
+
+type Ratings [2]int
+
+type AnonNoExpansion struct {
+	Scores
+	Ratings
+	Name string `csv:"name"`
+}
+
+func TestValidateOutput_cyclicErrorNamesRequestedAndOffendingTypesInBothValidationOrders(t *testing.T) {
 	const helperEnvironment = "ETLER_CSVSHAPE_CYCLE_CACHE_ORDER"
 	if order := os.Getenv(helperEnvironment); order != "" {
 		var firstType reflect.Type
@@ -57,7 +90,7 @@ func TestValidateOutput_cyclicErrorNamesRequestedTypeInBothValidationOrders(t *t
 
 	for _, order := range []string{"forward", "reverse"} {
 		t.Run(order, func(t *testing.T) {
-			command := exec.Command(os.Args[0], "-test.run=^TestValidateOutput_cyclicErrorNamesRequestedTypeInBothValidationOrders$")
+			command := exec.Command(os.Args[0], "-test.run=^TestValidateOutput_cyclicErrorNamesRequestedAndOffendingTypesInBothValidationOrders$")
 			command.Env = append(os.Environ(), helperEnvironment+"="+order)
 			output, err := command.CombinedOutput()
 
@@ -65,15 +98,15 @@ func TestValidateOutput_cyclicErrorNamesRequestedTypeInBothValidationOrders(t *t
 			require.Contains(
 				t,
 				string(output),
-				"order="+order+" err=invalid cyclic CSV output type csvshape.soloQHolder",
+				"order="+order+" err=invalid cyclic CSV output type csvshape.soloQHolder: cycle detected at csvshape.cacheQ",
 			)
 		})
 	}
 }
 
 func TestValidateOutput_rejectsCycles(t *testing.T) {
-	require.ErrorContains(t, ValidateOutput(reflect.TypeFor[pointerCycle]()), "invalid cyclic CSV output type csvshape.pointerCycle")
-	require.ErrorContains(t, ValidateOutput(reflect.TypeFor[sliceCycle]()), "invalid cyclic CSV output type csvshape.sliceCycle")
+	require.EqualError(t, ValidateOutput(reflect.TypeFor[pointerCycle]()), "invalid cyclic CSV output type csvshape.pointerCycle")
+	require.EqualError(t, ValidateOutput(reflect.TypeFor[sliceCycle]()), "invalid cyclic CSV output type csvshape.sliceCycle")
 }
 
 func TestValidateOutput_cachesCyclicSentinel(t *testing.T) {
@@ -82,11 +115,54 @@ func TestValidateOutput_cachesCyclicSentinel(t *testing.T) {
 	csvOutputTypeValidationCache.Delete(key)
 	defer csvOutputTypeValidationCache.Delete(key)
 
-	require.ErrorContains(t, ValidateOutput(rowType), "invalid cyclic CSV output type csvshape.pointerCycle")
+	require.EqualError(t, validate(rowType, nil, gocsv.TagName), errCyclicCSVOutputType.Error())
+	require.EqualError(t, ValidateOutput(rowType), "invalid cyclic CSV output type csvshape.pointerCycle")
 	cached, exists := csvOutputTypeValidationCache.Load(key)
 	require.True(t, exists)
 	require.ErrorIs(t, cached.(csvOutputTypeValidationCacheValue).err, errCyclicCSVOutputType)
 	require.EqualError(t, ValidateOutput(rowType), "invalid cyclic CSV output type csvshape.pointerCycle")
+}
+
+func TestValidateOutput_cyclicErrorMatchesSentinel(t *testing.T) {
+	err := ValidateOutput(reflect.TypeFor[soloQHolder]())
+	require.EqualError(t, err, "invalid cyclic CSV output type csvshape.soloQHolder: cycle detected at csvshape.cacheQ")
+	require.True(t, errors.Is(err, errCyclicCSVOutputType))
+}
+
+func TestValidateOutput_rejectsAnonymousExpansions(t *testing.T) {
+	t.Run("scalar slice elements", func(t *testing.T) {
+		require.EqualError(
+			t,
+			ValidateOutput(reflect.TypeFor[AnonExp]()),
+			"invalid CSV output type csvshape.AnonExp uses unsupported csv[] slice expansion on anonymous field Scores: gocsv drops anonymous non-struct fields entirely, so the tag cannot take effect; move the tag to a named field",
+		)
+	})
+
+	t.Run("struct array elements", func(t *testing.T) {
+		require.EqualError(
+			t,
+			ValidateOutput(reflect.TypeFor[AnonStructExp]()),
+			"invalid CSV output type csvshape.AnonStructExp uses unsupported csv[] slice expansion on anonymous field StructScores: gocsv drops anonymous non-struct fields entirely, so the tag cannot take effect; move the tag to a named field",
+		)
+	})
+}
+
+func TestValidateOutput_preservesExpansionNegativeControls(t *testing.T) {
+	t.Run("named expansion loads and writes", func(t *testing.T) {
+		require.NoError(t, ValidateOutput(reflect.TypeFor[NamedExp]()))
+
+		var rows []NamedExp
+		require.NoError(t, gocsv.Unmarshal(strings.NewReader("scores[0],scores[1],name\n10,20,ada\n"), &rows))
+		require.Equal(t, []NamedExp{{Scores: Scores{10, 20}, Name: "ada"}}, rows)
+
+		output, err := gocsv.MarshalString(rows)
+		require.NoError(t, err)
+		require.Equal(t, "scores[0],scores[1],name\n10,20,ada\n", output)
+	})
+
+	t.Run("anonymous fields without expansion tags", func(t *testing.T) {
+		require.NoError(t, ValidateOutput(reflect.TypeFor[AnonNoExpansion]()))
+	})
 }
 
 func TestValidateOutput_handlesExpansionAndTagNameForms(t *testing.T) {
