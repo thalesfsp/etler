@@ -3,9 +3,11 @@ package csv
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/gocarina/gocsv"
 	"github.com/thalesfsp/etler/v4/converter"
+	"github.com/thalesfsp/etler/v4/internal/csvshape"
 	"github.com/thalesfsp/validation"
 )
 
@@ -33,6 +35,13 @@ func New[In any](
 ) (*CSV[[]In], error) {
 	// Enforces interface implementation.
 	var _ converter.IConverter[[]In, string] = (*CSV[[]In])(nil)
+	rowType := reflect.TypeFor[In]()
+	if rowType.Kind() == reflect.Pointer {
+		rowType = rowType.Elem()
+	}
+	if err := csvshape.ValidateCycle(rowType); err != nil {
+		return nil, err
+	}
 
 	conv, err := converter.New(
 		Name,
@@ -42,7 +51,9 @@ func New[In any](
 				return "", err
 			}
 
-			return gocsv.MarshalString(in)
+			return callGocsv(reflect.TypeFor[[]In](), func() (string, error) {
+				return gocsv.MarshalString(in)
+			})
 		},
 		opts...,
 	)
@@ -63,6 +74,20 @@ func New[In any](
 	}
 
 	return csv, nil
+}
+
+//////
+// Helpers.
+//////
+
+func callGocsv[Result any](inType reflect.Type, call func() (Result, error)) (result Result, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("gocsv panic for CSV input type %s: %v", inType, recovered)
+		}
+	}()
+
+	return call()
 }
 
 // Must creates a CSV converter or panics if validation fails.
