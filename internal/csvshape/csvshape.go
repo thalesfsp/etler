@@ -2,6 +2,7 @@ package csvshape
 
 import (
 	"encoding"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -21,12 +22,12 @@ var (
 	csvUnmarshallerType           = reflect.TypeFor[gocsv.TypeUnmarshaller]()
 	csvWithFieldsUnmarshallerType = reflect.TypeFor[gocsv.TypeUnmarshalCSVWithFields]()
 	csvOutputTypeValidationCache  sync.Map
+	errCyclicCSVOutputType        = errors.New("cyclic CSV output type")
 )
 
 type csvOutputTypeValidationCacheKey struct {
-	rowType           reflect.Type
-	tagName           string
-	validateExpansion bool
+	rowType reflect.Type
+	tagName string
 }
 
 type csvOutputTypeValidationCacheValue struct {
@@ -39,12 +40,12 @@ type csvOutputTypeValidationCacheValue struct {
 
 // ValidateOutput rejects cyclic row types and lossy csv[] expansion forms.
 func ValidateOutput(rowType reflect.Type) error {
-	return validate(rowType, nil, gocsv.TagName, true)
-}
+	err := validate(rowType, nil, gocsv.TagName)
+	if errors.Is(err, errCyclicCSVOutputType) {
+		return customerror.NewInvalidError(fmt.Sprintf("cyclic CSV output type %s", rowType))
+	}
 
-// ValidateCycle rejects cyclic row types without checking csv[] expansions.
-func ValidateCycle(rowType reflect.Type) error {
-	return validate(rowType, nil, gocsv.TagName, false)
+	return err
 }
 
 //////
@@ -55,7 +56,6 @@ func validate(
 	rowType reflect.Type,
 	active map[reflect.Type]struct{},
 	tagName string,
-	validateExpansion bool,
 ) (err error) {
 	if rowType.Kind() != reflect.Struct {
 		return nil
@@ -64,13 +64,12 @@ func validate(
 		active = make(map[reflect.Type]struct{})
 	}
 	if _, exists := active[rowType]; exists {
-		return customerror.NewInvalidError(fmt.Sprintf("cyclic CSV output type %s", rowType))
+		return errCyclicCSVOutputType
 	}
 
 	cacheKey := csvOutputTypeValidationCacheKey{
-		rowType:           rowType,
-		tagName:           tagName,
-		validateExpansion: validateExpansion,
+		rowType: rowType,
+		tagName: tagName,
 	}
 	if cached, exists := csvOutputTypeValidationCache.Load(cacheKey); exists {
 		return cached.(csvOutputTypeValidationCacheValue).err
@@ -87,40 +86,38 @@ func validate(
 		if field.PkgPath != "" {
 			continue
 		}
-		if validateExpansion {
-			// This deliberately follows every pointer level even though gocsv's
-			// traversal follows one: accepting an ignored csv[] tag loses columns.
-			expansionType := field.Type
-			for expansionType.Kind() == reflect.Pointer {
-				expansionType = expansionType.Elem()
+		// This deliberately follows every pointer level even though gocsv's
+		// traversal follows one: accepting an ignored csv[] tag loses columns.
+		expansionType := field.Type
+		for expansionType.Kind() == reflect.Pointer {
+			expansionType = expansionType.Elem()
+		}
+		if expansionCount, expands := field.Tag.Lookup(tagName + "[]"); expands &&
+			(expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array) {
+			if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
+				return customerror.NewInvalidError(fmt.Sprintf(
+					"CSV output type %s uses unsupported csv[] slice expansion on field %s: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field",
+					rowType,
+					field.Name,
+				))
 			}
-			if expansionCount, expands := field.Tag.Lookup(tagName + "[]"); expands &&
-				(expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array) {
-				if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
-					return customerror.NewInvalidError(fmt.Sprintf(
-						"CSV output type %s uses unsupported csv[] slice expansion on field %s: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field",
-						rowType,
-						field.Name,
-					))
-				}
-				count, err := strconv.Atoi(expansionCount)
-				if err != nil || count <= 0 {
-					return customerror.NewInvalidError(fmt.Sprintf(
-						"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %q is non-numeric or non-positive; use a positive integer count",
-						rowType,
-						field.Name,
-						expansionCount,
-					))
-				}
-				if field.Type.Kind() == reflect.Array && count > field.Type.Len() {
-					return customerror.NewInvalidError(fmt.Sprintf(
-						"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %d exceeds array length %d; use a count no greater than the array length",
-						rowType,
-						field.Name,
-						count,
-						field.Type.Len(),
-					))
-				}
+			count, err := strconv.Atoi(expansionCount)
+			if err != nil || count <= 0 {
+				return customerror.NewInvalidError(fmt.Sprintf(
+					"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %q is non-numeric or non-positive; use a positive integer count",
+					rowType,
+					field.Name,
+					expansionCount,
+				))
+			}
+			if field.Type.Kind() == reflect.Array && count > field.Type.Len() {
+				return customerror.NewInvalidError(fmt.Sprintf(
+					"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %d exceeds array length %d; use a count no greater than the array length",
+					rowType,
+					field.Name,
+					count,
+					field.Type.Len(),
+				))
 			}
 		}
 
@@ -129,7 +126,7 @@ func validate(
 			structType = structType.Elem()
 		}
 		if structType.Kind() == reflect.Struct && !gocsvCanMarshal(structType) {
-			if err := validate(structType, active, tagName, validateExpansion); err != nil {
+			if err := validate(structType, active, tagName); err != nil {
 				return err
 			}
 			continue
@@ -137,7 +134,7 @@ func validate(
 		if !field.Anonymous &&
 			(field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) &&
 			field.Type.Elem().Kind() == reflect.Struct {
-			if err := validate(field.Type.Elem(), active, tagName, validateExpansion); err != nil {
+			if err := validate(field.Type.Elem(), active, tagName); err != nil {
 				return err
 			}
 		}

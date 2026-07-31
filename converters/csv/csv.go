@@ -39,7 +39,7 @@ func New[In any](
 	if rowType.Kind() == reflect.Pointer {
 		rowType = rowType.Elem()
 	}
-	if err := csvshape.ValidateCycle(rowType); err != nil {
+	if err := csvshape.ValidateOutput(rowType); err != nil {
 		return nil, err
 	}
 

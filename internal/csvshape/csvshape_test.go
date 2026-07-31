@@ -2,6 +2,9 @@ package csvshape
 
 import (
 	"encoding"
+	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
 	"testing"
 
@@ -17,39 +20,73 @@ type sliceCycle struct {
 	Children []sliceCycle
 }
 
-type outputFirstLossyExpansion struct {
-	Values *[]int `csv:"values" csv[]:"2"`
-}
-
-type cycleFirstLossyExpansion struct {
-	Values []int `csv:"values" csv[]:"0"`
-}
-
 type overlongArrayExpansion struct {
 	Values [1]int `csv:"values" csv[]:"2"`
 }
 
-func TestValidateCycleAndOutput_doNotShareCachedVerdicts(t *testing.T) {
-	t.Run("output rejection does not leak to cycle validation", func(t *testing.T) {
-		require.ErrorContains(t, ValidateOutput(reflect.TypeFor[outputFirstLossyExpansion]()), "unsupported csv[] slice expansion")
-		require.NoError(t, ValidateCycle(reflect.TypeFor[outputFirstLossyExpansion]()))
-		require.ErrorContains(t, ValidateOutput(reflect.TypeFor[outputFirstLossyExpansion]()), "unsupported csv[] slice expansion")
-	})
-
-	t.Run("cycle acceptance does not leak to output validation", func(t *testing.T) {
-		require.NoError(t, ValidateCycle(reflect.TypeFor[cycleFirstLossyExpansion]()))
-		require.ErrorContains(t, ValidateOutput(reflect.TypeFor[cycleFirstLossyExpansion]()), "positive integer count")
-		require.NoError(t, ValidateCycle(reflect.TypeFor[cycleFirstLossyExpansion]()))
-	})
+type cacheP struct {
+	Q *cacheQ
 }
 
-func TestValidateCycle_rejectsCycles(t *testing.T) {
-	require.ErrorContains(t, ValidateCycle(reflect.TypeFor[pointerCycle]()), "invalid cyclic CSV output type csvshape.pointerCycle")
-	require.ErrorContains(t, ValidateCycle(reflect.TypeFor[sliceCycle]()), "invalid cyclic CSV output type csvshape.sliceCycle")
+type cacheQ struct {
+	P *cacheP
 }
 
-func TestValidateCycle_acceptsOverlongArrayExpansion(t *testing.T) {
-	require.NoError(t, ValidateCycle(reflect.TypeFor[overlongArrayExpansion]()))
+type soloQHolder struct {
+	Q cacheQ
+}
+
+func TestValidateOutput_cyclicErrorNamesRequestedTypeInBothValidationOrders(t *testing.T) {
+	const helperEnvironment = "ETLER_CSVSHAPE_CYCLE_CACHE_ORDER"
+	if order := os.Getenv(helperEnvironment); order != "" {
+		var firstType reflect.Type
+		switch order {
+		case "forward":
+			firstType = reflect.TypeFor[cacheP]()
+		case "reverse":
+			firstType = reflect.TypeFor[cacheQ]()
+		default:
+			t.Fatalf("unknown validation order %q", order)
+		}
+
+		require.Error(t, ValidateOutput(firstType))
+		fmt.Printf("order=%s err=%v\n", order, ValidateOutput(reflect.TypeFor[soloQHolder]()))
+
+		return
+	}
+
+	for _, order := range []string{"forward", "reverse"} {
+		t.Run(order, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^TestValidateOutput_cyclicErrorNamesRequestedTypeInBothValidationOrders$")
+			command.Env = append(os.Environ(), helperEnvironment+"="+order)
+			output, err := command.CombinedOutput()
+
+			require.NoError(t, err, "cycle-cache helper failed:\n%s", output)
+			require.Contains(
+				t,
+				string(output),
+				"order="+order+" err=invalid cyclic CSV output type csvshape.soloQHolder",
+			)
+		})
+	}
+}
+
+func TestValidateOutput_rejectsCycles(t *testing.T) {
+	require.ErrorContains(t, ValidateOutput(reflect.TypeFor[pointerCycle]()), "invalid cyclic CSV output type csvshape.pointerCycle")
+	require.ErrorContains(t, ValidateOutput(reflect.TypeFor[sliceCycle]()), "invalid cyclic CSV output type csvshape.sliceCycle")
+}
+
+func TestValidateOutput_cachesCyclicSentinel(t *testing.T) {
+	rowType := reflect.TypeFor[pointerCycle]()
+	key := csvOutputTypeValidationCacheKey{rowType: rowType, tagName: gocsv.TagName}
+	csvOutputTypeValidationCache.Delete(key)
+	defer csvOutputTypeValidationCache.Delete(key)
+
+	require.ErrorContains(t, ValidateOutput(rowType), "invalid cyclic CSV output type csvshape.pointerCycle")
+	cached, exists := csvOutputTypeValidationCache.Load(key)
+	require.True(t, exists)
+	require.ErrorIs(t, cached.(csvOutputTypeValidationCacheValue).err, errCyclicCSVOutputType)
+	require.EqualError(t, ValidateOutput(rowType), "invalid cyclic CSV output type csvshape.pointerCycle")
 }
 
 func TestValidateOutput_handlesExpansionAndTagNameForms(t *testing.T) {
@@ -59,6 +96,14 @@ func TestValidateOutput_handlesExpansionAndTagNameForms(t *testing.T) {
 		}
 
 		require.NoError(t, ValidateOutput(reflect.TypeFor[row]()))
+	})
+
+	t.Run("pointer-wrapped expansion", func(t *testing.T) {
+		type row struct {
+			Values *[]int `csv:"values" csv[]:"2"`
+		}
+
+		require.ErrorContains(t, ValidateOutput(reflect.TypeFor[row]()), "pointer-wrapped slice or array fields")
 	})
 
 	t.Run("non-numeric expansion", func(t *testing.T) {
@@ -125,7 +170,7 @@ func (*pointerFieldsUnmarshaller) UnmarshalCSVWithFields(_, _ string) error {
 	return nil
 }
 
-func TestValidateCycle_treatsGocsvScalarInterfacesAsLeaves(t *testing.T) {
+func TestValidateOutput_treatsGocsvScalarInterfacesAsLeaves(t *testing.T) {
 	types := []reflect.Type{
 		reflect.TypeFor[valueCSVMarshaler](),
 		reflect.TypeFor[pointerTextMarshaler](),
@@ -134,11 +179,11 @@ func TestValidateCycle_treatsGocsvScalarInterfacesAsLeaves(t *testing.T) {
 	}
 
 	for _, typ := range types {
-		require.NoError(t, ValidateCycle(typ))
+		require.NoError(t, ValidateOutput(typ))
 	}
 }
 
-func TestValidateCycle_handlesNonStructAndSupportedNesting(t *testing.T) {
+func TestValidateOutput_handlesNonStructAndSupportedNesting(t *testing.T) {
 	type child struct {
 		Name string
 	}
@@ -149,8 +194,8 @@ func TestValidateCycle_handlesNonStructAndSupportedNesting(t *testing.T) {
 		hidden *pointerCycle
 	}
 
-	require.NoError(t, ValidateCycle(reflect.TypeFor[int]()))
-	require.NoError(t, ValidateCycle(reflect.TypeFor[row]()))
+	require.NoError(t, ValidateOutput(reflect.TypeFor[int]()))
+	require.NoError(t, ValidateOutput(reflect.TypeFor[row]()))
 	require.NotNil(t, row{hidden: &pointerCycle{}}.hidden)
 }
 
