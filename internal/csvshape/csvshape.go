@@ -129,45 +129,51 @@ func validate(
 		if field.PkgPath != "" {
 			continue
 		}
-		// This deliberately follows every pointer level even though gocsv's
-		// traversal follows one: accepting an ignored csv[] tag loses columns.
-		expansionType := field.Type
-		for expansionType.Kind() == reflect.Pointer {
-			expansionType = expansionType.Elem()
-		}
-		if expansionCount, expands := field.Tag.Lookup(tagName + "[]"); expands &&
-			(expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array) {
-			if field.Anonymous {
-				return customerror.NewInvalidError(fmt.Sprintf(
-					"CSV output type %s uses unsupported csv[] slice expansion on anonymous field %s: gocsv drops anonymous non-struct fields entirely, so the tag cannot take effect; move the tag to a named field",
-					rowType,
-					field.Name,
-				))
+		if expansionCount, expands := field.Tag.Lookup(tagName + "[]"); expands {
+			// This deliberately follows every pointer level even though gocsv's
+			// traversal follows one: accepting an ignored csv[] tag loses columns.
+			expansionType := field.Type
+			visitedExpansionTypes := make(map[reflect.Type]struct{})
+			for expansionType.Kind() == reflect.Pointer {
+				if _, exists := visitedExpansionTypes[expansionType]; exists {
+					break
+				}
+				visitedExpansionTypes[expansionType] = struct{}{}
+				expansionType = expansionType.Elem()
 			}
-			if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
-				return customerror.NewInvalidError(fmt.Sprintf(
-					"CSV output type %s uses unsupported csv[] slice expansion on field %s: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field",
-					rowType,
-					field.Name,
-				))
-			}
-			count, err := strconv.Atoi(expansionCount)
-			if err != nil || count <= 0 {
-				return customerror.NewInvalidError(fmt.Sprintf(
-					"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %q is non-numeric or non-positive; use a positive integer count",
-					rowType,
-					field.Name,
-					expansionCount,
-				))
-			}
-			if field.Type.Kind() == reflect.Array && count > field.Type.Len() {
-				return customerror.NewInvalidError(fmt.Sprintf(
-					"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %d exceeds array length %d; use a count no greater than the array length",
-					rowType,
-					field.Name,
-					count,
-					field.Type.Len(),
-				))
+			if expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array {
+				if field.Anonymous {
+					return customerror.NewInvalidError(fmt.Sprintf(
+						"CSV output type %s uses unsupported csv[] slice expansion on anonymous field %s: gocsv drops anonymous non-struct fields entirely, so the tag cannot take effect; move the tag to a named field",
+						rowType,
+						field.Name,
+					))
+				}
+				if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
+					return customerror.NewInvalidError(fmt.Sprintf(
+						"CSV output type %s uses unsupported csv[] slice expansion on field %s: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field",
+						rowType,
+						field.Name,
+					))
+				}
+				count, err := strconv.Atoi(expansionCount)
+				if err != nil || count <= 0 {
+					return customerror.NewInvalidError(fmt.Sprintf(
+						"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %q is non-numeric or non-positive; use a positive integer count",
+						rowType,
+						field.Name,
+						expansionCount,
+					))
+				}
+				if field.Type.Kind() == reflect.Array && count > field.Type.Len() {
+					return customerror.NewInvalidError(fmt.Sprintf(
+						"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %d exceeds array length %d; use a count no greater than the array length",
+						rowType,
+						field.Name,
+						count,
+						field.Type.Len(),
+					))
+				}
 			}
 		}
 
