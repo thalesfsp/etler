@@ -49,10 +49,11 @@ var validateCSVOutputType = csvshape.ValidateOutput
 // not byte-exact: Name also matches a header with surrounding whitespace or
 // U+200B, U+200C, U+200D, and U+FEFF zero-width characters removed. A
 // process-wide gocsv header normalizer can change that rule; use explicit csv
-// tags when accepted spelling must be unambiguous. Two collisions resolve
-// silently: a header matching a field shadowed by an outer field of the same
-// name fills the shadowed embedded field, and when two fields share a csv tag
-// only the first is filled.
+// tags when accepted spelling must be unambiguous. Collisions resolve silently
+// by declaration order: when an embedded and an outer field share a name, or two
+// fields share a csv tag, gocsv fills whichever is declared first and leaves the
+// other zero. Go's shadowing rules do not decide this, so an outer field that
+// shadows an embedded one in normal Go can still lose to it here.
 //
 // Numeric conversion uses gocsv's permissive, not range-safe semantics: 010
 // decodes as 8, 1_0 as 10, and 127.9 into an integer as 127. Out-of-range
