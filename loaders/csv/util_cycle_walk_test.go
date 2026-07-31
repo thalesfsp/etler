@@ -20,6 +20,56 @@ type textUnmarshalerCycle struct {
 	Next *textUnmarshalerCycle
 }
 
+type dashNormalizerCycle struct {
+	Name string
+	Next *dashNormalizerCycle `csv:"-"`
+}
+
+type ENSRows []ENSRow
+
+type ENSRow struct {
+	Name string
+	ENSRows
+}
+
+type AnonymousStructCycleEmbedded struct {
+	Next *AnonymousStructCycleRow
+}
+
+type AnonymousStructCycleRow struct {
+	Name string
+	AnonymousStructCycleEmbedded
+}
+
+func TestLoad_rejectsSkippedCycleWhenNormalizerRewritesDash(t *testing.T) {
+	const helperEnvironment = "ETLER_CSV_DASH_NORMALIZER_CYCLE_HELPER"
+	if os.Getenv(helperEnvironment) == "1" {
+		gocsv.SetHeaderNormalizer(func(value string) string {
+			return strings.ReplaceAll(value, "-", "_")
+		})
+		defer gocsv.SetHeaderNormalizer(gocsv.DefaultNameNormalizer())
+
+		out, err := Load[[]dashNormalizerCycle](strings.NewReader("Name\nbob\n"))
+		fmt.Printf("rows=%d err=%v\n", len(out), err)
+		if err == nil {
+			os.Exit(2)
+		}
+
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLoad_rejectsSkippedCycleWhenNormalizerRewritesDash$")
+	command.Env = append(os.Environ(), helperEnvironment+"=1", "GOTRACEBACK=none")
+	output, err := command.CombinedOutput()
+
+	require.NoError(t, err, "cycle helper did not exit successfully (context error %v):\n%s", ctx.Err(), output)
+	require.NoError(t, ctx.Err(), "cycle helper exceeded its timeout:\n%s", output)
+	require.Contains(t, string(output), "err=invalid cyclic CSV output type csv.dashNormalizerCycle")
+}
+
 func (*textUnmarshalerCycle) UnmarshalText([]byte) error {
 	return nil
 }
@@ -92,7 +142,7 @@ func TestLoad_acceptsCycleBehindTwoPointers(t *testing.T) {
 	require.Equal(t, []DD{{Name: "a"}}, out)
 }
 
-func TestLoad_acceptsSkippedNonAnonymousCycle(t *testing.T) {
+func TestLoad_rejectsSkippedNonAnonymousCycle(t *testing.T) {
 	type Skip struct {
 		Name string
 		Next *Skip `csv:"-"`
@@ -100,8 +150,37 @@ func TestLoad_acceptsSkippedNonAnonymousCycle(t *testing.T) {
 
 	out, err := Load[[]Skip](strings.NewReader("Name\na\n"))
 
-	require.NoError(t, err)
-	require.Equal(t, []Skip{{Name: "a"}}, out)
+	require.Nil(t, out)
+	require.ErrorContains(t, err, "invalid cyclic CSV output type csv.Skip")
+}
+
+func TestLoad_acceptsAnonymousSliceOfStruct(t *testing.T) {
+	t.Run("cyclic element", func(t *testing.T) {
+		out, err := Load[[]ENSRow](strings.NewReader("Name\nbob\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []ENSRow{{Name: "bob"}}, out)
+	})
+
+	t.Run("non-cyclic element", func(t *testing.T) {
+		type Names []struct{ Value string }
+		type Row struct {
+			Name string
+			Names
+		}
+
+		out, err := Load[[]Row](strings.NewReader("Name\nbob\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []Row{{Name: "bob"}}, out)
+	})
+}
+
+func TestLoad_rejectsCycleThroughAnonymousStruct(t *testing.T) {
+	out, err := Load[[]AnonymousStructCycleRow](strings.NewReader("Name\nbob\n"))
+
+	require.Nil(t, out)
+	require.ErrorContains(t, err, "invalid cyclic CSV output type csv.AnonymousStructCycleRow")
 }
 
 func TestLoad_acceptsPointerWrappedSliceCycle(t *testing.T) {

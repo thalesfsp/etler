@@ -1,12 +1,14 @@
 package csv
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gocarina/gocsv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -243,7 +245,7 @@ func TestValidateCSVOutputType_handlesSupportedFieldShapes(t *testing.T) {
 		When time.Time
 	}
 
-	err := validateCSVOutputType(reflect.TypeFor[row](), nil)
+	err := validateCSVOutputType(reflect.TypeFor[row]())
 	require.NoError(t, err)
 
 	// An unexported field must never be discovered: reflection cannot set it,
@@ -252,18 +254,55 @@ func TestValidateCSVOutputType_handlesSupportedFieldShapes(t *testing.T) {
 	require.Equal(t, 42, row{hidden: 42}.hidden)
 }
 
-func TestLoad_rejectsCSVSliceExpansion(t *testing.T) {
+func TestLoad_acceptsCSVSliceExpansion(t *testing.T) {
+	type item struct {
+		ID int
+	}
 	type row struct {
-		Items []struct {
-			ID uint8
-		} `csv:"Items" csv[]:"2"`
+		Items []item `csv:"items" csv[]:"2"`
 	}
 
-	out, err := Load[[]row](strings.NewReader("Items[0].ID\n256\n"))
-	assert.Nil(t, out)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
-	assert.ErrorContains(t, err, "Items")
+	out, err := Load[[]row](strings.NewReader("items[0].ID,items[1].ID\n7,8\n"))
+	require.NoError(t, err)
+	require.Equal(t, []row{{Items: []item{{ID: 7}, {ID: 8}}}}, out)
+}
+
+func TestLoad_acceptsDirectCSVSliceExpansionForms(t *testing.T) {
+	t.Run("slice of primitives", func(t *testing.T) {
+		type row struct {
+			Items []int `csv:"items" csv[]:"2"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("items[0],items[1]\n7,8\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []row{{Items: []int{7, 8}}}, out)
+	})
+
+	t.Run("array of primitives", func(t *testing.T) {
+		type row struct {
+			Items [2]int `csv:"items" csv[]:"2"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("items[0],items[1]\n7,8\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []row{{Items: [2]int{7, 8}}}, out)
+	})
+
+	t.Run("array of structs", func(t *testing.T) {
+		type item struct {
+			ID int
+		}
+		type row struct {
+			Items [2]item `csv:"items" csv[]:"2"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("items[0].ID,items[1].ID\n7,8\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []row{{Items: [2]item{{ID: 7}, {ID: 8}}}}, out)
+	})
 }
 
 func TestLoad_rejectsCSVSliceExpansionThroughPointer(t *testing.T) {
@@ -276,6 +315,47 @@ func TestLoad_rejectsCSVSliceExpansionThroughPointer(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
 	assert.ErrorContains(t, err, "Items")
+}
+
+func TestLoad_rejectsCSVSliceExpansionWithInvalidCount(t *testing.T) {
+	t.Run("pointer-wrapped", func(t *testing.T) {
+		type row struct {
+			Items *[]int `csv:"items" csv[]:"2"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("items[0],items[1]\n7,8\n"))
+
+		require.Nil(t, out)
+		require.ErrorContains(t, err, "unsupported csv[] slice expansion")
+		require.ErrorContains(t, err, "pointer-wrapped")
+		require.NotContains(t, err.Error(), "positive integer count")
+	})
+
+	tests := []struct {
+		name  string
+		count string
+	}{
+		{name: "non-numeric", count: "many"},
+		{name: "zero", count: "0"},
+		{name: "negative", count: "-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			field := reflect.StructOf([]reflect.StructField{{
+				Name: "Items",
+				Type: reflect.TypeFor[[]int](),
+				Tag:  reflect.StructTag(`csv:"items" csv[]:"` + tt.count + `"`),
+			}})
+
+			err := validateCSVOutputType(field)
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
+			assert.ErrorContains(t, err, "positive integer count")
+			assert.NotContains(t, err.Error(), "pointer-wrapped")
+		})
+	}
 }
 
 func TestLoad_rejectsCSVSliceExpansionThroughOtherWrappers(t *testing.T) {
@@ -305,13 +385,73 @@ func TestLoad_rejectsCSVSliceExpansionThroughOtherWrappers(t *testing.T) {
 }
 
 func TestValidateCSVOutputType_rejectsCycles(t *testing.T) {
-	err := validateCSVOutputType(reflect.TypeFor[PointerCycle](), nil)
+	err := validateCSVOutputType(reflect.TypeFor[PointerCycle]())
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cyclic CSV output type")
 
-	err = validateCSVOutputType(reflect.TypeFor[SliceCycle](), nil)
+	err = validateCSVOutputType(reflect.TypeFor[SliceCycle]())
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cyclic CSV output type")
+}
+
+func TestLoad_memoizesCSVOutputTypeValidationByTypeAndTagName(t *testing.T) {
+	t.Run("repeated load uses cached verdict", func(t *testing.T) {
+		type row struct {
+			Name string
+		}
+
+		key := csvOutputTypeValidationCacheKey{
+			rowType: reflect.TypeFor[row](),
+			tagName: gocsv.TagName,
+		}
+		csvOutputTypeValidationCache.Delete(key)
+		defer csvOutputTypeValidationCache.Delete(key)
+
+		out, err := Load[[]row](strings.NewReader("Name\nbob\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Name: "bob"}}, out)
+
+		cached, ok := csvOutputTypeValidationCache.Load(key)
+		require.True(t, ok)
+		require.NoError(t, cached.(csvOutputTypeValidationCacheValue).err)
+
+		cachedErr := errors.New("cached CSV output type verdict")
+		csvOutputTypeValidationCache.Store(key, csvOutputTypeValidationCacheValue{err: cachedErr})
+
+		out, err = Load[[]row](strings.NewReader("Name\nbob\n"))
+		require.Nil(t, out)
+		require.ErrorIs(t, err, cachedErr)
+	})
+
+	t.Run("tag name change re-evaluates verdict", func(t *testing.T) {
+		type row struct {
+			Items []int `csv:"items" csv[]:"0" alternate:"items" alternate[]:"2"`
+		}
+
+		originalTagName := gocsv.TagName
+		defer func() { gocsv.TagName = originalTagName }()
+
+		rowType := reflect.TypeFor[row]()
+		csvKey := csvOutputTypeValidationCacheKey{rowType: rowType, tagName: "csv"}
+		alternateKey := csvOutputTypeValidationCacheKey{rowType: rowType, tagName: "alternate"}
+		csvOutputTypeValidationCache.Delete(csvKey)
+		csvOutputTypeValidationCache.Delete(alternateKey)
+		defer csvOutputTypeValidationCache.Delete(csvKey)
+		defer csvOutputTypeValidationCache.Delete(alternateKey)
+
+		gocsv.TagName = "csv"
+		err := validateCSVOutputType(rowType)
+		require.ErrorContains(t, err, "positive integer count")
+
+		gocsv.TagName = "alternate"
+		err = validateCSVOutputType(rowType)
+		require.NoError(t, err)
+
+		_, csvCached := csvOutputTypeValidationCache.Load(csvKey)
+		_, alternateCached := csvOutputTypeValidationCache.Load(alternateKey)
+		require.True(t, csvCached)
+		require.True(t, alternateCached)
+	})
 }
 
 func TestLoad_round6TimeFieldDoesNotHideGocsvUint8Truncation(t *testing.T) {

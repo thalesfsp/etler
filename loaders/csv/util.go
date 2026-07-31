@@ -9,7 +9,8 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strings"
+	"strconv"
+	"sync"
 
 	"github.com/gocarina/gocsv"
 	"github.com/thalesfsp/customerror/v2"
@@ -24,7 +25,17 @@ var (
 	textMarshallerType            = reflect.TypeFor[encoding.TextMarshaler]()
 	csvUnmarshallerType           = reflect.TypeFor[gocsv.TypeUnmarshaller]()
 	csvWithFieldsUnmarshallerType = reflect.TypeFor[gocsv.TypeUnmarshalCSVWithFields]()
+	csvOutputTypeValidationCache  sync.Map
 )
+
+type csvOutputTypeValidationCacheKey struct {
+	rowType reflect.Type
+	tagName string
+}
+
+type csvOutputTypeValidationCacheValue struct {
+	err error
+}
 
 //////
 // Loader.
@@ -32,19 +43,24 @@ var (
 
 // Load converts CSV data to a slice. It rejects nil readers and non-slice output
 // types. Two row shapes are rejected up front: cycles, which make gocsv recurse
-// until the process dies of an unrecoverable stack overflow, and csv[]
-// expansion, which can silently discard columns. Other type incompatibilities
-// are delegated to gocsv; any panic is returned as an error naming the output
-// type and recovered value. That guard also covers a panic raised by a
-// caller-supplied UnmarshalCSV or UnmarshalText, which is reported the same way.
+// until the process dies of an unrecoverable stack overflow, and lossy csv[]
+// expansion forms. Direct slice or array fields with a positive csv[] count are
+// supported; pointer-wrapped fields and invalid counts are rejected because
+// gocsv silently discards their columns. Other type incompatibilities are
+// delegated to gocsv; any panic is returned as an error naming the output type
+// and recovered value. That guard also covers a panic raised by a caller-supplied
+// UnmarshalCSV or UnmarshalText, which is reported the same way.
 //
-// Cycle rejection mirrors gocsv's own traversal, so a shape gocsv collapses to a
-// single value is accepted: a field type implementing MarshalCSV, MarshalText,
-// UnmarshalCSV, or UnmarshalCSVWithFields is a leaf, a csv:"-" tag on a named
-// field skips it, and only one pointer level is followed. A type implementing
-// only encoding.TextUnmarshaler is not a leaf, because gocsv descends into it.
-// The csv[] check is deliberately stricter than gocsv and follows every pointer
-// level, because gocsv ignores that tag on a *[]T field and loses the columns.
+// Cycle rejection walks a safe superset of gocsv's traversal. A csv:"-" field
+// does not exempt its type from the cycle check: gocsv applies its process-wide
+// header normalizer before deciding whether to skip the field, and that
+// normalizer cannot be read, so the skip cannot be mirrored safely. A field type
+// implementing MarshalCSV, MarshalText, UnmarshalCSV, or
+// UnmarshalCSVWithFields is a leaf, and only one pointer level is followed. A
+// type implementing only encoding.TextUnmarshaler is not a leaf, because gocsv
+// descends into it. Anonymous struct fields are traversed, while anonymous slice
+// and array fields are not, matching gocsv's unconditional handling of those
+// forms. The csv[] check follows every pointer level to find ignored tags.
 //
 // By default gocsv resolves field keys case-sensitively, but header matching is
 // not byte-exact: Name also matches a header with surrounding whitespace or
@@ -74,7 +90,7 @@ func Load[Out any](in io.Reader) (Out, error) {
 	if rowType.Kind() == reflect.Pointer {
 		rowType = rowType.Elem()
 	}
-	if err := validateCSVOutputType(rowType, nil); err != nil {
+	if err := validateCSVOutputType(rowType); err != nil {
 		return *new(Out), err
 	}
 	if isNil(in) {
@@ -135,7 +151,15 @@ func isNil(value any) bool {
 	}
 }
 
-func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{}) error {
+func validateCSVOutputType(rowType reflect.Type) error {
+	return validateCSVOutputTypeWithTagName(rowType, nil, gocsv.TagName)
+}
+
+func validateCSVOutputTypeWithTagName(
+	rowType reflect.Type,
+	active map[reflect.Type]struct{},
+	tagName string,
+) (err error) {
 	if rowType.Kind() != reflect.Struct {
 		return nil
 	}
@@ -145,26 +169,47 @@ func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{
 	if _, exists := active[rowType]; exists {
 		return customerror.NewInvalidError(fmt.Sprintf("cyclic CSV output type %s", rowType))
 	}
+
+	cacheKey := csvOutputTypeValidationCacheKey{rowType: rowType, tagName: tagName}
+	if cached, exists := csvOutputTypeValidationCache.Load(cacheKey); exists {
+		return cached.(csvOutputTypeValidationCacheValue).err
+	}
+
 	active[rowType] = struct{}{}
 	defer delete(active, rowType)
+	defer func() {
+		csvOutputTypeValidationCache.Store(cacheKey, csvOutputTypeValidationCacheValue{err: err})
+	}()
+
 	for index := range rowType.NumField() {
 		field := rowType.Field(index)
 		if field.PkgPath != "" {
 			continue
 		}
-		if !field.Anonymous && gocsvSkipsField(field) {
-			continue
-		}
-
 		// This deliberately follows every pointer level even though gocsv's
 		// traversal follows one: accepting an ignored csv[] tag loses columns.
 		expansionType := field.Type
 		for expansionType.Kind() == reflect.Pointer {
 			expansionType = expansionType.Elem()
 		}
-		if _, expands := field.Tag.Lookup(gocsv.TagName + "[]"); expands &&
+		if expansionCount, expands := field.Tag.Lookup(tagName + "[]"); expands &&
 			(expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array) {
-			return customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
+			if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
+				return customerror.NewInvalidError(fmt.Sprintf(
+					"CSV output type %s uses unsupported csv[] slice expansion on field %s: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field",
+					rowType,
+					field.Name,
+				))
+			}
+			count, err := strconv.Atoi(expansionCount)
+			if err != nil || count <= 0 {
+				return customerror.NewInvalidError(fmt.Sprintf(
+					"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %q is non-numeric or non-positive; use a positive integer count",
+					rowType,
+					field.Name,
+					expansionCount,
+				))
+			}
 		}
 
 		structType := field.Type
@@ -172,14 +217,15 @@ func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{
 			structType = structType.Elem()
 		}
 		if structType.Kind() == reflect.Struct && !gocsvCanMarshal(structType) {
-			if err := validateCSVOutputType(structType, active); err != nil {
+			if err := validateCSVOutputTypeWithTagName(structType, active, tagName); err != nil {
 				return err
 			}
 			continue
 		}
-		if (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) &&
+		if !field.Anonymous &&
+			(field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) &&
 			field.Type.Elem().Kind() == reflect.Struct {
-			if err := validateCSVOutputType(field.Type.Elem(), active); err != nil {
+			if err := validateCSVOutputTypeWithTagName(field.Type.Elem(), active, tagName); err != nil {
 				return err
 			}
 		}
@@ -195,19 +241,6 @@ func callGocsv[Result any](outType reflect.Type, call func() (Result, error)) (r
 	}()
 
 	return call()
-}
-
-func gocsvSkipsField(field reflect.StructField) bool {
-	filteredTags := make([]string, 0, 1)
-	for _, tag := range strings.Split(field.Tag.Get(gocsv.TagName), gocsv.TagSeparator) {
-		tag = strings.TrimSpace(tag)
-		if tag == "omitempty" || strings.HasPrefix(tag, "partial") || strings.HasPrefix(tag, "default=") {
-			continue
-		}
-		filteredTags = append(filteredTags, tag)
-	}
-
-	return len(filteredTags) == 1 && filteredTags[0] == "-"
 }
 
 func gocsvCanMarshal(typ reflect.Type) bool {
