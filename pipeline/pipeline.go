@@ -503,6 +503,15 @@ func New[ProcessedData, ConvertedOut any](
 		return nil, err
 	}
 
+	for position, stg := range stages {
+		if shared.IsNil(stg) {
+			return nil, customerror.NewRequiredError(
+				"stage",
+				customerror.WithField("position", position),
+			)
+		}
+	}
+
 	p := &Pipeline[ProcessedData, ConvertedOut]{
 		ConcurrentStage: concurrentStage,
 		Stages:          stages,

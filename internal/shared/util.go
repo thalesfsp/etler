@@ -29,6 +29,22 @@ func GenerateUUID() string {
 	return uuid.New().String()
 }
 
+// IsNil reports whether value is nil or holds a nil value in an interface.
+func IsNil(value any) bool {
+	if value == nil {
+		return true
+	}
+
+	reflected := reflect.ValueOf(value)
+
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
 // Flatten2D concatenates the inner slices in order. It returns nil when data
 // contains no elements.
 func Flatten2D[T any](data [][]T) []T {

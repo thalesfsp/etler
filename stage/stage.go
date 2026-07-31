@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
+	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v4/converter"
 	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/etler/v4/internal/logging"
@@ -442,6 +443,15 @@ func New[ProcessingData, ConvertedData any](
 		Name string `validate:"required"`
 	}{Name: name}); err != nil {
 		return nil, err
+	}
+
+	for position, proc := range processors {
+		if shared.IsNil(proc) {
+			return nil, customerror.NewRequiredError(
+				"processor",
+				customerror.WithField("position", position),
+			)
+		}
 	}
 
 	s := &Stage[ProcessingData, ConvertedData]{
