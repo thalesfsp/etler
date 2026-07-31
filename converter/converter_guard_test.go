@@ -61,14 +61,6 @@ type converterValueGuard struct {
 	IConverter[int, int]
 }
 
-type converterMissingImplementationGuard struct {
-	IConverter[int, int]
-}
-
-type converterTaggedMissingImplementationGuard struct {
-	IConverter[int, int] `validate:"required"`
-}
-
 func newGuardConverter(t *testing.T) IConverter[int, int] {
 	t.Helper()
 
@@ -198,45 +190,6 @@ func TestIsNilOptionResult_converterValues(t *testing.T) {
 
 			assert.NotNil(t, c)
 			assert.NoError(t, err)
-		})
-	}
-}
-
-func TestNew_rejectsMissingEmbeddedImplementationBeforeMetricGetters(t *testing.T) {
-	tests := []struct {
-		name  string
-		value IConverter[int, int]
-	}{
-		{
-			name:  "untagged",
-			value: &converterMissingImplementationGuard{},
-		},
-		{
-			name:  "tagged",
-			value: &converterTaggedMissingImplementationGuard{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var constructorErr error
-
-			assert.NotPanics(t, func() {
-				c, err := New(
-					"converter-missing-implementation-"+tt.name,
-					"converter missing implementation",
-					func(_ context.Context, in int) (int, error) {
-						return in, nil
-					},
-					func(IConverter[int, int]) IConverter[int, int] {
-						return tt.value
-					},
-				)
-				constructorErr = err
-
-				assert.Nil(t, c)
-			})
-			require.EqualError(t, constructorErr, "converter option result required")
 		})
 	}
 }

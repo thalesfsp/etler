@@ -8,7 +8,9 @@ import (
 // Consts, vars and types.
 //////
 
-// Func configures a converter and returns the implementation to retain.
+// Func configures a converter and returns the implementation to retain. An
+// option must return a usable implementation; returning one whose embedded
+// interface is nil will panic when it is used, as it would anywhere in Go.
 type Func[In, Out any] func(p IConverter[In, Out]) IConverter[In, Out]
 
 // OnFinished runs after a conversion succeeds. It may be called concurrently.

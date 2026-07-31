@@ -3,6 +3,7 @@ package loader
 import (
 	"context"
 	"expvar"
+	"reflect"
 	"sync"
 	"time"
 
@@ -230,8 +231,10 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 //////
 
 // New creates a loader. It applies options in order, retains each returned
-// implementation, and then validates the result. Nil options, results, and
-// embedded implementations at any anonymous-field depth are rejected.
+// implementation, and then validates the result. Nil options and results are
+// rejected. An option must return a usable implementation; returning one whose
+// embedded interface is nil will panic when it is used, as it would anywhere
+// in Go.
 // Structural validation runs before lifecycle metric getters; the final
 // implementation must expose non-nil lifecycle metrics.
 func New[In, Out any](
@@ -271,8 +274,15 @@ func New[In, Out any](
 		}
 
 		c = opt(c)
-		if shared.HasNilEmbeddedImplementation(c) {
+		if c == nil {
 			return nil, customerror.NewRequiredError("loader option result")
+		}
+		value := reflect.ValueOf(c)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return nil, customerror.NewRequiredError("loader option result")
+			}
 		}
 	}
 

@@ -130,13 +130,21 @@ func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{
 		if len(tagParts) == 1 && strings.TrimSpace(tagParts[0]) == "-" {
 			continue
 		}
-		if _, expands := field.Tag.Lookup(gocsv.TagName + "[]"); expands &&
-			(field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) {
-			return customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
-		}
 		fieldType := field.Type
 		if fieldType.Kind() == reflect.Pointer {
 			fieldType = fieldType.Elem()
+		}
+		if field.Anonymous && fieldType.Kind() != reflect.Struct {
+			return customerror.NewInvalidError(fmt.Sprintf(
+				"CSV output type %s uses unsupported anonymous field %s with non-struct type %s",
+				rowType,
+				field.Name,
+				field.Type,
+			))
+		}
+		if _, expands := field.Tag.Lookup(gocsv.TagName + "[]"); expands &&
+			(field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) {
+			return customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
 		}
 		if fieldType.Kind() == reflect.Struct && !hasCustomUnmarshaller(fieldType) {
 			if err := validateCSVOutputType(fieldType, active); err != nil {

@@ -18,13 +18,87 @@ func (value *GuardCustomInt) UnmarshalCSV(string) error {
 	return nil
 }
 
+func TestLoad_rejectsAnonymousNamedString(t *testing.T) {
+	type Name string
+	type Row struct {
+		Name
+	}
+
+	var (
+		out []Row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]Row](strings.NewReader("Name\nalice\n"))
+	})
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported anonymous field")
+	assert.ErrorContains(t, err, "Name")
+}
+
+func TestLoad_rejectsAnonymousSlice(t *testing.T) {
+	type Items []string
+	type row struct {
+		Items
+	}
+
+	out, err := Load[[]row](strings.NewReader("Items\nalice\n"))
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported anonymous field")
+	assert.ErrorContains(t, err, "Items")
+}
+
+func TestLoad_rejectsAnonymousMap(t *testing.T) {
+	type Values map[string]string
+	type row struct {
+		Values
+	}
+
+	out, err := Load[[]row](strings.NewReader("Values\nalice\n"))
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported anonymous field")
+	assert.ErrorContains(t, err, "Values")
+}
+
+func TestLoad_rejectsAnonymousInterface(t *testing.T) {
+	type Value interface{}
+	type row struct {
+		Value
+	}
+
+	out, err := Load[[]row](strings.NewReader("Value\nalice\n"))
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported anonymous field")
+	assert.ErrorContains(t, err, "Value")
+}
+
+func TestLoad_acceptsAnonymousStruct(t *testing.T) {
+	type Embedded struct {
+		Name string
+	}
+	type row struct {
+		Embedded
+	}
+
+	out, err := Load[[]row](strings.NewReader("Name\nalice\n"))
+	require.NoError(t, err)
+	require.Equal(t, []row{{
+		Embedded: Embedded{Name: "alice"},
+	}}, out)
+}
+
 func TestValidateCSVOutputType_handlesSupportedFieldShapes(t *testing.T) {
 	type Embedded struct {
 		Value int
 	}
 	type row struct {
 		Embedded
-		GuardCustomInt
+		Custom  GuardCustomInt
 		Ignored int `csv:"-"`
 		hidden  int
 		Parent  struct {

@@ -69,14 +69,6 @@ type processorValueGuard struct {
 	IProcessor[int]
 }
 
-type processorMissingImplementationGuard struct {
-	IProcessor[int]
-}
-
-type processorTaggedMissingImplementationGuard struct {
-	IProcessor[int] `validate:"required"`
-}
-
 func newGuardProcessor(t *testing.T) IProcessor[int] {
 	t.Helper()
 
@@ -211,45 +203,6 @@ func TestIsNilOptionResult_processorValues(t *testing.T) {
 
 			assert.NotNil(t, p)
 			assert.NoError(t, err)
-		})
-	}
-}
-
-func TestNew_rejectsMissingEmbeddedImplementationBeforeMetricGetters(t *testing.T) {
-	tests := []struct {
-		name  string
-		value IProcessor[int]
-	}{
-		{
-			name:  "untagged",
-			value: &processorMissingImplementationGuard{},
-		},
-		{
-			name:  "tagged",
-			value: &processorTaggedMissingImplementationGuard{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var constructorErr error
-
-			assert.NotPanics(t, func() {
-				p, err := New(
-					"processor-missing-implementation-"+tt.name,
-					"processor missing implementation",
-					func(_ context.Context, data []int) ([]int, error) {
-						return data, nil
-					},
-					func(IProcessor[int]) IProcessor[int] {
-						return tt.value
-					},
-				)
-				constructorErr = err
-
-				assert.Nil(t, p)
-			})
-			require.EqualError(t, constructorErr, "processor option result required")
 		})
 	}
 }

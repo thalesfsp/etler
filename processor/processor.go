@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"expvar"
+	"reflect"
 	"sync"
 	"time"
 
@@ -323,8 +324,10 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 //////
 
 // New creates a processor. It applies options in order, retains each returned
-// implementation, and then validates the result. Nil options, results, and
-// embedded implementations at any anonymous-field depth are rejected.
+// implementation, and then validates the result. Nil options and results are
+// rejected. An option must return a usable implementation; returning one whose
+// embedded interface is nil will panic when it is used, as it would anywhere
+// in Go.
 // Structural validation runs before lifecycle metric getters; the final
 // implementation must expose non-nil lifecycle metrics. The transform must not
 // mutate its input slice or pointed-to values.
@@ -366,8 +369,15 @@ func New[ProcessingData any](
 		}
 
 		p = opt(p)
-		if shared.HasNilEmbeddedImplementation(p) {
+		if p == nil {
 			return nil, customerror.NewRequiredError("processor option result")
+		}
+		value := reflect.ValueOf(p)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return nil, customerror.NewRequiredError("processor option result")
+			}
 		}
 	}
 

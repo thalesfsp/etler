@@ -8,7 +8,9 @@ import (
 // Consts, vars and types.
 //////
 
-// Func configures a processor and returns the implementation to retain.
+// Func configures a processor and returns the implementation to retain. An
+// option must return a usable implementation; returning one whose embedded
+// interface is nil will panic when it is used, as it would anywhere in Go.
 type Func[T any] func(p IProcessor[T]) IProcessor[T]
 
 // OnFinished runs after a processor succeeds with its original input and
