@@ -109,10 +109,10 @@ func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer
 
 		if idFieldName != "" {
 			if strings.EqualFold(field.Name, idFieldName) {
-				return extractIDValue(v.Field(i))
+				return extractIDValueWithVisited(v.Field(i), visited)
 			}
 		} else if strings.EqualFold(field.Name, "ID") || strings.EqualFold(field.Name, "Id") {
-			return extractIDValue(v.Field(i))
+			return extractIDValueWithVisited(v.Field(i), visited)
 		}
 	}
 
@@ -129,9 +129,25 @@ func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer
 }
 
 func extractIDValue(v reflect.Value) string {
+	return extractIDValueWithVisited(v, make(map[extractIDPointer]struct{}))
+}
+
+func extractIDValueWithVisited(v reflect.Value, visited map[extractIDPointer]struct{}) string {
 	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
 		if v.IsNil() {
 			return ""
+		}
+
+		if v.Kind() == reflect.Pointer {
+			pointer := extractIDPointer{
+				address: v.Pointer(),
+				typ:     v.Type(),
+			}
+			if _, ok := visited[pointer]; ok {
+				return ""
+			}
+
+			visited[pointer] = struct{}{}
 		}
 
 		v = v.Elem()
