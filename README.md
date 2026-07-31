@@ -174,8 +174,12 @@ Then make each applicable migration below:
   matters. Tabs in quoted values are now preserved; callers that relied on v3
   sanitizing them must strip them explicitly.
 
-  Loading and writing run the same validation, so a type the converter writes is
-  a type the loader reads. They differ in mechanics: writing calls
+  Loading and writing run the same *shape* validation — cycles and `csv[]` forms
+  are judged identically on both paths. That is not a round-trip guarantee:
+  gocsv's marshal and unmarshal interfaces are directional, so a field
+  implementing only `MarshalCSV` writes fine and fails to load back. Implement
+  both halves for any type you intend to round-trip. They also differ in
+  mechanics: writing calls
   `gocsv.MarshalString` through gocsv's writer factory, while loading strips one
   leading UTF-8 BOM and constructs `encoding/csv.NewReader` directly, so a
   host-configured gocsv reader factory does not affect the loader. The loader does use gocsv's tag name, tag separator, field
