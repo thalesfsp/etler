@@ -189,12 +189,21 @@ Then make each applicable migration below:
   rather than at conversion, and would otherwise die even on an empty input
   slice, because the recursion is driven by the type, not the values.
 
-  **`csv[]` expansion is supported where gocsv handles it.** A direct `[]T` or
-  `[N]T` field with a positive count decodes normally. Two forms are rejected
-  because gocsv discards their columns with no error: the tag on a
-  pointer-wrapped field, which gocsv ignores entirely, and a count that is
-  non-numeric or non-positive, which expands to nothing. The error says which
-  applies.
+  **`csv[]` expansion is supported where gocsv handles it.** A direct `[]T` field
+  with a positive count, or a `[N]T` field whose count is at most `N`, decodes
+  normally. Three forms are rejected: the tag on a pointer-wrapped field, which
+  gocsv ignores entirely; a count that is non-numeric or non-positive, which
+  expands to nothing; and a count larger than the array it applies to, which
+  fails inside gocsv. The first two discard columns with no error. The message
+  says which applies.
+
+  **Configure gocsv's package-level settings before loading a type for the first
+  time.** gocsv caches each row type's field mapping keyed only by the type, with
+  no way to invalidate it, so the first load anywhere in the process freezes that
+  mapping. Changing `gocsv.TagName` or the header normalizer afterwards does not
+  re-resolve it: the old mapping stays in force, the new headers match nothing,
+  and the affected fields come back zero-valued with **no error**. Treat those
+  settings as process-wide startup configuration.
 
   Cycle rejection walks a deliberate *superset* of gocsv's own traversal: it may
   reject a type gocsv could technically load, but it can never miss one that

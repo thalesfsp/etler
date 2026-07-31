@@ -53,11 +53,19 @@ brings statement coverage to 99.3%.
   and `bool` fields decode directly. The loader also no longer strips tab
   characters, which previously corrupted legitimately quoted content such as
   `"a\tb"`. gocsv's `csv[]` slice expansion is supported where gocsv handles it:
-  a direct `[]T` or `[N]T` field with a positive count decodes normally. Two
-  forms are rejected because gocsv discards their columns with no error — the tag
-  on a pointer-wrapped field, which gocsv ignores outright, and a count that is
-  non-numeric or non-positive, which expands to nothing. The error distinguishes
-  them.
+  a direct `[]T` field with a positive count, or a `[N]T` field whose count is at
+  most `N`, decodes normally. Three forms are rejected — the tag on a
+  pointer-wrapped field, which gocsv ignores outright; a count that is
+  non-numeric or non-positive, which expands to nothing; and a count larger than
+  its array, which fails inside gocsv. The first two discard columns with no
+  error. The message distinguishes them.
+
+  gocsv's package-level tag and header settings must be configured before a row
+  type is loaded for the first time. gocsv caches each type's field mapping keyed
+  only by the type and cannot invalidate it, so the first load freezes that
+  mapping process-wide; changing `TagName` or the header normalizer afterwards
+  leaves the old mapping in force and the affected fields come back zero-valued
+  with no error.
 
   Cyclic types are rejected on both the read and the write path, because they
   make gocsv recurse until the process dies of an unrecoverable stack overflow.
