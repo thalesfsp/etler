@@ -177,24 +177,38 @@ Then make each applicable migration below:
   Loading and writing are not symmetric. Writing calls `gocsv.MarshalString`
   through gocsv's writer factory and supports gocsv's `csv[]` expansion.
   Loading strips one leading UTF-8 BOM, constructs `encoding/csv.NewReader`
-  directly, and rejects output types that use `csv[]`; a host-configured gocsv
-  reader factory therefore does not affect this loader. The loader does use
-  gocsv's tag name, tag separator, field combiner, header normalizer, and
-  duplicate-header settings; `gocsv.FailIfUnmatchedStructTags` does not affect
-  it.
+  directly; a host-configured gocsv reader factory therefore does not affect
+  this loader. The loader does use gocsv's tag name, tag separator, field
+  combiner, header normalizer, and duplicate-header settings;
+  `gocsv.FailIfUnmatchedStructTags` does not affect it.
 
-  **Two output shapes are rejected before decoding.** A cyclic output type is
-  rejected because gocsv would recurse until the process dies of an
-  unrecoverable stack overflow, which no `recover` can catch. A `csv[]` tag is
-  rejected, including on a pointer-wrapped slice, because gocsv silently ignores
-  it there and the columns would vanish without an error.
+  **Cyclic types are rejected on both paths, before gocsv sees them.** A
+  self-referential type makes gocsv recurse until the process dies of a stack
+  overflow, which no `recover` can catch, so `loaders/csv.Load` and
+  `converters/csv.New` both reject one. The converter fails at construction
+  rather than at conversion, and would otherwise die even on an empty input
+  slice, because the recursion is driven by the type, not the values.
 
-  Cycle rejection mirrors gocsv's own traversal, so a shape gocsv treats as a
-  single value is accepted. A field type implementing `MarshalCSV`,
-  `MarshalText`, `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf; a
-  `csv:"-"` tag on a named (non-embedded) field skips it entirely; only one
-  pointer level is followed, so `**T` is a leaf. A type implementing only
+  **`csv[]` expansion is supported where gocsv handles it.** A direct `[]T` or
+  `[N]T` field with a positive count decodes normally. Two forms are rejected
+  because gocsv discards their columns with no error: the tag on a
+  pointer-wrapped field, which gocsv ignores entirely, and a count that is
+  non-numeric or non-positive, which expands to nothing. The error says which
+  applies.
+
+  Cycle rejection walks a deliberate *superset* of gocsv's own traversal: it may
+  reject a type gocsv could technically load, but it can never miss one that
+  kills the process. A field type implementing `MarshalCSV`, `MarshalText`,
+  `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
+  level is followed, so `**T` is a leaf. A type implementing only
   `encoding.TextUnmarshaler` is **not** a leaf, because gocsv descends into it.
+  Anonymous struct fields are traversed; anonymous slice and array fields are
+  not, because gocsv drops them.
+
+  A `csv:"-"` tag does **not** exempt a field from the cycle check. gocsv applies
+  its process-wide header normalizer before deciding whether to skip the field,
+  and that normalizer cannot be read back, so honouring the tag could let a
+  cyclic type through into an unrecoverable crash.
 
   **Field matching is gocsv's, and two cases resolve silently.** When an outer
   field shadows an embedded one of the same name, a matching header fills the

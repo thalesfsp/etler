@@ -52,20 +52,25 @@ brings statement coverage to 99.3%.
   `json:"age,string"` workaround is no longer needed — plain `int`, `float64`
   and `bool` fields decode directly. The loader also no longer strips tab
   characters, which previously corrupted legitimately quoted content such as
-  `"a\tb"`. Output types using gocsv's `csv[]` slice expansion are rejected,
-  including through pointer wrappers: gocsv silently ignores that tag on a
-  `*[]T` field, so the columns the caller expected to expand would vanish
-  without an error.
+  `"a\tb"`. gocsv's `csv[]` slice expansion is supported where gocsv handles it:
+  a direct `[]T` or `[N]T` field with a positive count decodes normally. Two
+  forms are rejected because gocsv discards their columns with no error — the tag
+  on a pointer-wrapped field, which gocsv ignores outright, and a count that is
+  non-numeric or non-positive, which expands to nothing. The error distinguishes
+  them.
 
-  Two further shapes are rejected because gocsv cannot survive them: a cyclic
-  output type, which makes gocsv recurse until the process dies of an
-  unrecoverable stack overflow. Rejection mirrors gocsv's own traversal rules,
-  so a shape gocsv treats as a single value is accepted: a field whose type
-  implements `MarshalCSV`, `MarshalText`, `UnmarshalCSV`, or
-  `UnmarshalCSVWithFields` is a leaf, a `csv:"-"` field on a named (non-embedded)
-  field is skipped entirely, and only one pointer level is followed. A type
-  implementing only `encoding.TextUnmarshaler` is **not** a leaf, because gocsv
-  descends into it.
+  Cyclic types are rejected on both the read and the write path, because they
+  make gocsv recurse until the process dies of an unrecoverable stack overflow.
+  The walk is a deliberate *superset* of gocsv's own traversal — it may reject a
+  type gocsv could technically load, but it can never miss one that kills the
+  process. A field whose type implements `MarshalCSV`, `MarshalText`,
+  `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
+  level is followed. A type implementing only `encoding.TextUnmarshaler` is
+  **not** a leaf, because gocsv descends into it. Anonymous struct fields are
+  traversed; anonymous slice and array fields are not, because gocsv drops them.
+  A `csv:"-"` tag does not exempt a field: gocsv applies its process-wide header
+  normalizer before deciding to skip, and that normalizer cannot be read back, so
+  honouring the tag could let a cyclic type through into a crash.
 
   Loading and writing are not symmetric. The converter writes with
   `gocsv.MarshalString`, uses gocsv's writer factory, and supports `csv[]`.
@@ -148,8 +153,22 @@ removed, as listed under breaking changes.
   gocsv — `Load` never returned — and a `csv[]` field nested inside one was never
   seen, so its columns were dropped with no error. The same gap rejected shapes
   gocsv handles perfectly: cycles behind `MarshalText`, `UnmarshalCSVWithFields`,
-  a double pointer, a `csv:"-"` field, or `*[]T`. The guard now mirrors gocsv's
-  traversal decision for decision.
+  a double pointer, a `csv:"-"` field, or `*[]T`. The guard now walks a
+  deliberate superset of gocsv's traversal, so it can over-reject but never miss
+  a shape that kills the process.
+- **The CSV converter killed the process on a cyclic input type.** The read path
+  was hardened against those shapes; the write path was not. `MarshalString` was
+  called with no guard, and marshalling walks the same recursion, so a
+  self-referential type ended the process with an unrecoverable stack overflow —
+  even for an empty input slice, since the recursion follows the type rather than
+  the values. `converters/csv.New` now rejects the type at construction, and a
+  panic during marshalling becomes an error. The walk is shared with the loader
+  through `internal/csvshape` so the two paths cannot drift apart again.
+- **A `csv:"-"` field could defeat the cycle guard entirely.** The guard compared
+  the raw tag against `-`, while gocsv compares it after applying its
+  process-wide header normalizer. A normalizer that rewrote `-` therefore made
+  gocsv descend into a field the guard had skipped, and the process died. Because
+  that normalizer cannot be read back, the tag no longer exempts a field at all.
 - **A processor that filtered everything out failed its stage.** The idiomatic
   `var out []T` plus `append` returns nil when it keeps nothing, and the
   concurrent converter rejects nil input, so an ordinary empty result surfaced as
@@ -221,8 +240,8 @@ mutate their input slice or the values it points to.
 - README installation, quick start, concurrency contract, and a v3 upgrade guide.
 - Current statement coverage is 99.3%; `processor`, `processors/storage`,
   `converters/storage`, `converters/csv`, `converters/passthru`, `loaders/csv`,
-  `task`, `internal/logging`, `internal/metrics`, and `internal/shared` report
-  100%.
+  `task`, `internal/logging`, `internal/metrics`, `internal/shared`, and
+  `internal/csvshape` report 100%.
 
 ## [3.0.0] - 2026-07-03
 
