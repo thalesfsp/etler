@@ -219,11 +219,13 @@ Then make each applicable migration below:
   and that normalizer cannot be read back, so honouring the tag could let a
   cyclic type through into an unrecoverable crash.
 
-  **Field matching is gocsv's, and two cases resolve silently.** When an outer
-  field shadows an embedded one of the same name, a matching header fills the
-  *embedded* field, not the outer field that shadows it in Go's own rules. When
-  two fields carry the same `csv` tag, only the first is filled. Neither reports
-  an error; give colliding fields distinct `csv` tags.
+  **Field matching is gocsv's, and two cases resolve silently.** When two fields
+  can answer to the same header — an embedded field and an outer field of the
+  same name, or two fields carrying the same `csv` tag — gocsv fills whichever is
+  declared first and leaves the other zero. Declaration order decides it, not
+  Go's shadowing rules, so an outer field that shadows an embedded one in normal
+  Go can still lose to it here. Neither case reports an error; give colliding
+  fields distinct `csv` tags.
 
   A panic raised by your own `UnmarshalCSV` or `UnmarshalText` is caught by the
   same guard that catches gocsv's, so it is reported as a gocsv panic naming the

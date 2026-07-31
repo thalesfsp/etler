@@ -161,9 +161,10 @@ removed, as listed under breaking changes.
   gocsv — `Load` never returned — and a `csv[]` field nested inside one was never
   seen, so its columns were dropped with no error. The same gap rejected shapes
   gocsv handles perfectly: cycles behind `MarshalText`, `UnmarshalCSVWithFields`,
-  a double pointer, a `csv:"-"` field, or `*[]T`. The guard now walks a
-  deliberate superset of gocsv's traversal, so it can over-reject but never miss
-  a shape that kills the process.
+  a double pointer, or `*[]T`. The guard now walks a deliberate superset of
+  gocsv's traversal, so it can over-reject but never miss a shape that kills the
+  process. A cycle behind a `csv:"-"` field remains rejected on purpose, for the
+  reason given above.
 - **The CSV converter killed the process on a cyclic input type.** The read path
   was hardened against those shapes; the write path was not. `MarshalString` was
   called with no guard, and marshalling walks the same recursion, so a
