@@ -13,77 +13,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Major release. Module path is now `github.com/thalesfsp/etler/v4`.
 
-Second audit pass: bug and race fixes, a large efficiency improvement, and
-coverage raised to ~99%.
+The release hardens lifecycle concurrency, fixes tracing and storage failure
+paths, replaces the CSV loader's JSON round trip with direct gocsv decoding, and
+brings statement coverage to 99.1%.
 
 ### Breaking changes
+
 - **Module path** is `github.com/thalesfsp/etler/v4`. Consumers must update
-  their imports.
-- **`OnFinished` and `Async` are no longer exported fields.** Their accessors
-  (`GetOnFinished`/`SetOnFinished`, `GetAsync`/`SetAsync`) are unchanged and are
-  now the only way to reach them. With the fields exported, a caller could
-  assign them directly and race with a running `Run`, which made the
-  synchronisation bypassable. A consequence: the processor's `async` field no
-  longer appears in marshalled JSON.
+  imports. The module declares Go 1.25.
+- **`OnFinished` and `Processor.Async` are no longer exported fields.**
+  `OnFinished` is private on `Pipeline`, `Stage`, `Processor`, `Converter`, and
+  `Loader`; use `GetOnFinished`/`SetOnFinished`. Use
+  `GetAsync`/`SetAsync` for processor scheduling. The accessor signatures are
+  unchanged. Direct writes previously bypassed the locks used by `Run`.
+  `Processor.Async` also no longer appears in marshalled JSON.
 - **`Stage`, `Processor`, `Converter` and `Loader` gained unexported fields**
-  (the mutexes above), so unkeyed composite literals of those structs no longer
-  compile. Use the factories, as before. (`Pipeline` gained one too, but already
-  had an unexported field, so unkeyed literals of it were never possible.)
+  for those locks, so unkeyed composite literals no longer compile. Use the
+  `New` factories. (`Pipeline` already had an unexported field in v3.)
+- **`Pipeline.UpdateObservability` was removed.** It was an exported internal
+  completion helper, not part of `IPipeline`. Remove direct calls; `Run` still
+  writes lifecycle status, counters, progress, and duration and invokes
+  `OnFinished` after successful serialized execution is released. There is no
+  public replacement for custom execution paths.
+- **Concurrent `Run` calls on one `Pipeline` are now serialized.** Consumers
+  that intentionally overlapped them must use separate pipeline instances and
+  must not share a `Stage` instance between those concurrent pipelines.
+  `OnFinished` runs after serialization is released, so callbacks can still
+  overlap.
 - **The CSV loader now decodes directly into the target type** with
-  [gocsv](https://github.com/gocarina/gocsv) — the same library the CSV
-  *converter* already used for writing. Reading and writing are therefore
-  symmetric, and plain `int`, `float64` and `bool` struct fields now work.
-  Structs are mapped by `csv:"..."` tag instead of `json:"..."`. In v3,
-  `encoding/json` matched untagged fields case-insensitively; v4 does not. As a
-  required migration step, consumers must add `csv:"..."` tags wherever a CSV
-  header differs in case or name from its Go field. The
+  [gocsv](https://github.com/gocarina/gocsv). Structs are mapped by
+  `csv:"..."` tag instead of `json:"..."`. Default matching is case-sensitive
+  but not byte-exact: gocsv also matches after trimming surrounding header
+  whitespace or removing U+200B, U+200C, U+200D, and U+FEFF zero-width
+  characters. A host-configured gocsv header normalizer applies to field keys
+  and headers and can make matching case-insensitive. Consumers should add
+  explicit `csv:"..."` tags wherever accepted header spelling must be
+  unambiguous. The
   `json:"age,string"` workaround is no longer needed — plain `int`, `float64`
   and `bool` fields decode directly. The loader also no longer strips tab
   characters, which previously corrupted legitimately quoted content such as
   `"a\tb"`. Output types using gocsv's `csv[]` slice expansion are rejected.
 
+  Loading and writing are not symmetric. The converter writes with
+  `gocsv.MarshalString`, uses gocsv's writer factory, and supports `csv[]`.
+  Loading strips one leading UTF-8 BOM, forces `encoding/csv.NewReader`, and
+  therefore ignores gocsv's reader factory. Its gocsv unmarshaller still uses
+  the package-level tag name, tag separator, field combiner, header normalizer,
+  and duplicate-header settings; `FailIfUnmatchedStructTags` does not affect
+  this loader.
+
   **Numeric conversion is gocsv's and is permissive, not range-safe:** `010`
   decodes as `8`, `1_0` as `10`, `127.9` into an integer as `127`, and
-  out-of-range values may wrap or become infinite. This is a deliberate,
-  documented limitation. Validating it requires gocsv's header-to-field
-  mapping, which it builds but keeps unexported with no accessor; four
-  mechanisms that tried to reconstruct it each failed and silently missed
-  fields, so the guarantee was withdrawn rather than faked. Callers needing a
-  syntax or range guarantee should decode into a `string` field and parse it
-  themselves. Note that v3's JSON-based path rejected some of these inputs, so
-  this is a narrowing in that one respect — traded for correct typed decoding
-  of ordinary values, which v3 could not do at all without a `,string` tag.
-- **Storage writes now use a stable id** derived from the item, instead of a
-  fresh UUID per attempt, so retrying after a timeout reuses the same key rather
-  than inserting under a new one. Whether that overwrites or is rejected is the
-  backend's `Create` semantics — etler guarantees the key, not the upsert. Two
-  structurally identical items therefore share an id; `WithIDFunc` and
-  `WithIDFieldName` are available when they must be distinct. Stability assumes
-  the item's own extension points are deterministic — a `fmt.Stringer` id or a
-  custom `MarshalJSON` that varies between calls will produce a varying id. The storage
-  constructors also take their own option type now, so entity options must be
-  wrapped in `WithConverterOptions` / `WithProcessorOptions`.
+  out-of-range values may wrap or become infinite. Callers needing a syntax or
+  range guarantee should decode into a `string` field and parse it themselves.
+- **Storage writes no longer default to a fresh UUID.** Without `WithIDFunc`,
+  they use the configured or default `ID`/`Id` field, then a SHA-256 hash of the
+  item's JSON. Stable field values or deterministic JSON therefore reuse a key
+  on retry. Whether that overwrites or is rejected is the backend's `Create`
+  semantics — etler guarantees the resolved key, not the upsert. Equal JSON
+  content shares an id. For distinct keys, give each logical record a stable
+  unique scalar field and select it with `WithIDFieldName`, or provide a
+  deterministic `WithIDFunc`. A `fmt.Stringer`-only field is ignored, its
+  `String` method is never called, and resolution falls through to the content
+  hash. A nondeterministic `WithIDFunc` or `MarshalJSON` can produce a different
+  key.
+  The storage constructors also take their own option type now, so entity
+  options must be wrapped in `WithConverterOptions` /
+  `WithProcessorOptions`.
 - **`processor.New("")` returns an error.** `Name` is now required, matching
   every other entity.
 - **Pause state is separate from lifecycle status.** `GetStatus` reports the
   run — `created` → `running` → `done`/`failed` — and never returns `paused`;
-  `SetPause` no longer writes it at all. `GetPaused` is the only truth about the
-  controller. Previously the two were conflated, which meant a run finishing
-  while paused could have its terminal status hidden until resume, or lost
-  entirely if it was never resumed.
+  `SetPause` changes only the controller and `GetPaused` reports that controller.
+  A paused controller and a running lifecycle are a valid combination while a
+  new run waits before its next processor. Terminal status remains visible even
+  when the controller stays paused.
 - **`converters/storage.New` rejects a blank target**, matching
   `processors/storage`.
 
 ### Performance
-Profiling attributed roughly 85% of all allocations to log messages that were
-built in full and then discarded by the level filter. Log payload construction
-on every run path is now gated behind the same emit rule sypl itself applies, so
-that work is skipped when the message would be discarded. The gate errs toward
-doing the work: it admits everything when `SYPL_LEVEL` or `SYPL_FILTER` is set,
-since those raise the level at runtime, and it cannot see an output processor
-that force-emits — the same limitation sypl's own opt-in fast gate documents. Span names use
-concatenation instead of `fmt.Sprintf`, and the CSV loader no longer round-trips
-its rows through a map and a JSON encode/decode pass.
+
+Debug and trace payload construction on entity run paths is now guarded by the
+same output-level rule used by sypl, so discarded messages do not pay to build
+their fields. The guard deliberately admits every message when `SYPL_LEVEL` or
+`SYPL_FILTER` is set because those values can raise the effective level at
+runtime. It cannot detect output processors that force a message through the
+level filter. Span names use string concatenation instead of `fmt.Sprintf`, and
+the CSV loader decodes directly instead of building maps and round-tripping them
+through JSON.
 
 Measured on an Apple M4 Pro, Go 1.26.5, median of three runs of
 `go test -run '^$' -bench . -benchtime 100x -count 3 .`; the raw output is
@@ -102,13 +119,13 @@ committed at [`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the
 Every figure above is the median of the three runs in the committed files, and
 can be recomputed from them.
 
-Recycling the pooled transaction (the trace fix below) is what took the
-single-call paths from ~20 µs to ~3 µs.
-
-No metric, status, counter, or duration write was removed or weakened — only
-discarded logging work is skipped.
+The logging guard does not remove status, counter, progress, or duration writes
+from the normal internal run paths. The exported
+`Pipeline.UpdateObservability` method that exposed completion writes was
+removed, as listed under breaking changes.
 
 ### Fixed
+
 - **`ExtractID` killed the process on a cyclic embedded pointer.** A
   self-referential exported embedded pointer recursed until the stack
   overflowed — a fatal error, not a recoverable panic. Traversal now records
@@ -120,18 +137,23 @@ discarded logging work is skipped.
   and the call made `Run` invoke a nil function and panic. Both are now guarded,
   and every call site snapshots the value once.
 - **Resuming clobbered a terminal status.** `SetPause(false)` after a run
-  finished overwrote `done` (or `failed`) with `running`. Pause and status
-  transitions now happen together under one lock, so an observer never sees a
-  paused controller reporting running.
+  finished overwrote `done` (or `failed`) with `running`. Pause-controller
+  transitions and lifecycle status are now independent: `SetPause` never writes
+  lifecycle status, and starting a run publishes `running` even when the
+  controller is paused. Observers must use `GetPaused` and `GetStatus`
+  separately.
 - **Async processors counted as complete when launched, not when finished.** A
   stage with a blocked async processor reported 100% immediately, and still
   reported full progress if that processor later failed.
-- **Failed runs reported the previous run's duration.** Duration is now written
-  on every return path.
-- **Traces were never reported.** Nothing ended the APM transaction the tracing
-  helper created, so neither it nor its spans ever shipped, and every standalone
-  call left one behind. The transaction is now ended by whoever created it, and
-  never when it was inherited from the caller's context.
+- **Failed pipeline and stage runs reported the previous run's duration.** Those
+  two run paths now replace duration on every return. Failed converter,
+  processor, and loader calls still retain their most recent successful
+  duration.
+- **Standalone trace transactions were never reported.** Etler ended the span
+  but not a transaction it created for a call without an inherited transaction.
+  Spans under an inherited transaction remained reportable when that
+  transaction's owner ended it. The returned ender now ends the span and any
+  transaction created by that trace, but never an inherited transaction.
 - **A nil storage panicked on first use.** `storage.New(nil, …)` returned a
   usable-looking entity because the storage was only captured inside a validated
   closure. Both storage factories now reject nil — including a typed nil inside
@@ -146,30 +168,28 @@ discarded logging work is skipped.
   matching every other entity. Callers passing `""` now get an error.
 
 ### Documented
+
 Contracts the design relied on but never stated: converters must be safe for
 concurrent use (a stage fans conversion out per item), and processors must not
 mutate their input slice or the values it points to.
 
-Concurrent `Run` calls on one `Pipeline` used to be a documented footgun; they
-are now serialized instead. The completion callback runs after that
-serialization is released — a callback that started a nested `Run` previously
-deadlocked — so callbacks may overlap and must be concurrency-safe.
-
 ### Added
-- **12 new runnable examples** (13 in total) across `etler`, `pipeline`,
-  `stage`, `processor`, `converter`, `loader`, `loaders/csv`, `converters/csv`
-  and `converters/passthru`, verified by `go test` so they cannot silently rot —
-  including an end-to-end one at the package root. Browse them on
+
+- **17 new runnable examples** (18 in total) across `etler`, `converter`,
+  `converters/csv`, `converters/passthru`, `converters/storage`, `loader`,
+  `loaders/csv`, `pipeline`, `processor`, `processors/storage`, `stage`, and
+  `task`, verified by `go test` so they cannot silently rot. Browse them on
   [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
-  `go test -run Example ./...`. The storage packages and `task` have none yet.
+  `go test -run Example ./...`.
 - A benchmark suite isolating per-item cost from fixed per-call cost.
-- Ten end-to-end scenarios, including a regression guard for the zero-value
-  data-loss bug, async failure, pause/resume, and context cancellation.
+- Ten new end-to-end tests (13 in total), including regression guards for the
+  zero-value data-loss bug, async failure, pause/resume, and context
+  cancellation.
 - README installation, quick start, concurrency contract, and a v3 upgrade guide.
-- Total coverage 96.8% → 99.0%; `processors/storage`, `converters/storage`,
-  `converters/csv` and `converters/passthru` are at 100%, `loaders/csv` at 96.0%.
-- The suite is hermetic against `SYPL_LEVEL` and `SYPL_FILTER`: it passes whether
-  or not either is exported.
+- Current statement coverage is 99.1%; `processor`, `processors/storage`,
+  `converters/storage`, `converters/csv`, `converters/passthru`, `task`,
+  `internal/logging`, and `internal/metrics` report 100%, and `loaders/csv`
+  reports 98.8%.
 
 ## [3.0.0] - 2026-07-03
 

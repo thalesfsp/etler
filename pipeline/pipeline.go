@@ -29,9 +29,11 @@ import (
 const Type = "pipeline"
 
 // Pipeline runs a configured sequence of stages and records lifecycle metrics.
-// Concurrent Run calls are serialized; lifecycle, progress, and duration
-// describe the active or most recently completed run. Completion callbacks run
-// after serialized execution is released and may overlap.
+// Concurrent Run calls are serialized. Shared observability updates in place:
+// status changes before task validation, progress resets after validation, and
+// duration is replaced before a successful completion callback or as an error
+// returns. Completion callbacks run after serialized execution is released and
+// may overlap.
 type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	// ConcurrentStage determines whether all stages receive the original task
 	// concurrently or each stage receives the preceding stage's output.
@@ -301,10 +303,12 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 // Run executes the pipeline. Sequential mode feeds each stage's full task into
 // the next; concurrent mode gives every stage the original task. Both modes
 // return one task per stage in stage order. Concurrent calls on one pipeline
-// are serialized; lifecycle, progress, and duration describe the active or
-// most recently completed run. Completion callbacks run after serialization
-// is released and must be concurrency-safe. Separate instances run
-// independently.
+// are serialized. Status changes before task validation, progress resets after
+// validation, and duration is replaced before a successful completion callback
+// or as an error returns. Completion callbacks run after serialization is
+// released and must be concurrency-safe. Separate instances run independently
+// unless their configured stages share component instances or published
+// metrics.
 func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processingData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
 	p.runMu.Lock()
 	runLocked := true

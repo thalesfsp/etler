@@ -1,35 +1,39 @@
 # Overview
 
-ETLer is a comprehensive and highly customizable Extract, Transform, Load (ETL) framework designed for modern data pipelines. Built with Go, ETLer provides a set of powerful tools and abstractions to streamline the process of extracting data from various sources, transforming it to meet specific requirements, and loading it into target systems.
+ETLer is a typed Extract, Transform, Load (ETL) framework for Go. It provides
+pipelines, stages, processors, converters, loaders, and storage adapters that
+can be composed without giving up ordinary Go functions and interfaces.
 
-In today's data-driven world, ETL pipelines have become essential for organizations to harness the full potential of their data. ETLer aims to simplify and accelerate the development of these pipelines, enabling developers to focus on the core logic of data transformations while providing a robust and efficient runtime environment.
-ETL pipelines play a crucial role in modern data architectures, particularly in the realm of artificial intelligence (AI) and 
-machine learning (ML). As the volume, variety, and velocity of data continue to grow, the ability to efficiently extract, transform, and load data becomes paramount.
-
-ETL pipelines enable organizations to:
-
-- Consolidate data from disparate sources into a unified format
-- Cleanse and validate data to ensure accuracy and consistency
-- Transform data to meet the specific requirements of downstream systems
-- Load data into target systems, such as data warehouses or AI/ML platforms
-- Automate data workflows to reduce manual intervention and improve efficiency
-- By leveraging ETL pipelines, organizations can ensure that their AI and ML models have access to high-quality, up-to-date, and relevant data, ultimately leading to more accurate insights and better decision-making.
+A pipeline runs stages either sequentially or concurrently. Within a stage,
+synchronous processor output feeds the next processor; async processors run on
+snapshots and do not feed their output forward. The stage converts the resulting
+items concurrently and waits for all async processors before it returns.
 
 ## Key Features
 
-- Modularity and Reusability: ETLer is designed with modularity and reusability at its core. The framework provides a set of building blocks, such as pipelines, stages, processors, converters, and loaders, which can be easily composed and reused across different ETL workflows. This modular approach enables developers to create complex data processing pipelines by combining and customizing these components to suit their specific requirements.
-
-- Flexible Pipeline Definition: ETLer allows developers to define multi-stage data processing pipelines using a declarative and intuitive syntax. Stages can be configured to run in both synchronous and concurrent modes, providing flexibility in execution and optimizing performance based on the specific needs of the pipeline.
-
-- Powerful Data Transformations:Transformations can be easily combined and chained together within stages to create complex data processing logic. The framework also allows developers to implement custom processors and converters using Go functions, providing unlimited flexibility in data manipulation.
-
-- Efficient Data Loading: Loaders allows to efficiently load data from various sources, including files, databases, APIs, and message queues. Loaders are designed to handle different data formats and protocols, making it easy to integrate with diverse data sources.
-
-- Comprehensive Observability: ETLer prioritizes observability and provides built-in features for monitoring, logging, and tracing pipeline execution. The framework exposes pipeline/stage/processor metrics using Golang's built-in, battle-tested `expvar` package (global registration is opt-in via `ETLER_METRICS_PUBLISH=true`), allowing easy integration with monitoring systems. Structured logging is powered by the `sypl` package, providing rich context and consistent log levels across the pipeline. Distributed tracing is supported through the `customapm` package which is powered under-the-hood by Elastic APM, enabling deep insights into pipeline performance and behavior.
-
-- Error Handling and Resilience: ETLer includes robust error handling mechanisms to ensure pipeline resilience and fault tolerance. Errors that occur during pipeline execution are propagated and handled gracefully, with detailed error messages and proper error reporting. Storage writes derive a stable id from each item, so a retry reuses the same key rather than inserting a second record — on a backend whose `Create` upserts, that means no duplicate.
-
-- Testing and Documentation: ETLer emphasizes the importance of testing and documentation. The framework includes a comprehensive suite of unit tests to ensure the reliability and correctness of pipeline components. The codebase is documented, with comments explaining the purpose and functionality of components facilitating adoption, and enable developers to effectively leverage the framework.
+- **Composable, typed building blocks:** loaders retrieve or decode data,
+  processors transform slices, converters map individual values, stages combine
+  processors with a converter, and pipelines coordinate stages.
+- **Two pipeline modes:** sequential pipelines feed each stage's task into the
+  next stage; concurrent pipelines give every stage the original task. Both
+  return one task per stage in declaration order.
+- **Custom functions and implementations:** the core packages expose generic
+  interfaces and functional options. The repository includes CSV, pass-through,
+  and storage implementations; callers can supply their own functions and
+  interface implementations.
+- **Lifecycle observability:** pipelines, stages, processors, converters, and
+  loaders record status, counters, and duration with `expvar`, emit structured
+  logs through `sypl`, and create Elastic APM transactions and spans.
+- **Retry-aware storage keys:** the built-in storage ID paths use an ID field or
+  a SHA-256 hash of the item's JSON, so stable input produces the same key on a
+  retry. This is not unconditional: `WithIDFunc` defines its own stability, and
+  a nondeterministic `MarshalJSON` changes the content-derived key. The storage
+  backend's `Create` semantics determine whether a repeated key overwrites,
+  rejects, or otherwise handles the write.
+- **Checked examples:** the repository has 18 runnable examples across 12
+  packages: `etler`, `converter`, `converters/csv`,
+  `converters/passthru`, `converters/storage`, `loader`, `loaders/csv`,
+  `pipeline`, `processor`, `processors/storage`, `stage`, and `task`.
 
 ## Installation
 
@@ -41,8 +45,8 @@ Requires Go 1.25 or newer.
 
 ## Quick start
 
-A pipeline is made of stages; each stage runs its processors in order, then
-converts every item.
+This sequential pipeline has one stage, one synchronous processor, and a
+pass-through converter:
 
 ```go
 package main
@@ -97,71 +101,132 @@ func main() {
 }
 ```
 
-Most packages ship runnable examples — see them on
+Browse the examples on
 [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
 `go test -run Example ./...`.
 
-### Concurrency contract
+## Concurrency contract
 
-Three rules the design relies on:
+The runtime relies on these rules:
 
 - **Converters must be safe for concurrent use.** A stage converts its items
-  concurrently, so the conversion function is called from many goroutines.
-- **Processors must not mutate their input slice, or the values it points to.**
-  A stage reuses the returned slice as the next processor's input, and async
-  processors receive only a shallow copy.
-- **Concurrent `Run` calls on one `Pipeline` are serialized.** Its lifecycle,
-  progress and duration describe the active or most recently completed run.
-  Completion callbacks run after that serialization is released, so two runs'
-  callbacks may overlap — a callback must be safe for concurrent use.
-  Separate instances are independent, with one exception: under
-  `ETLER_METRICS_PUBLISH=true`, two entities of the same type sharing a name
-  deliberately share the same published `expvar`s.
+  concurrently, so the same conversion function and completion callback may be
+  called from multiple goroutines.
+- **Processors must treat input as immutable.** A stage feeds each synchronous
+  result to the next processor. Async processors get a new slice containing a
+  shallow copy of the element values, so pointers and other references inside
+  those values still refer to shared data.
+- **A `Stage` instance must not run concurrently with itself.** Distinct stages
+  can run independently only when they do not share processors, a converter, or
+  published metric names.
+- **Concurrent `Run` calls on one `Pipeline` are serialized.** Lifecycle,
+  progress, and duration are shared across those runs and update at different
+  transition points: status becomes `running` before task validation, progress
+  resets after validation, and duration is replaced before a successful
+  completion callback or as a failed run returns. The callback runs after
+  serialization is released, so callbacks from two runs may overlap and must be
+  concurrency-safe.
+- **Published metrics can be shared across otherwise independent instances.**
+  With `ETLER_METRICS_PUBLISH=true`, entities with the same type and name reuse
+  the same global `expvar` values.
+
+## Metrics publishing
+
+Every entity owns its lifecycle metrics whether or not they are globally
+published. By default those values are available through the entity's getters
+but are not registered in the process-wide `expvar` registry.
+
+Set `ETLER_METRICS_PUBLISH` to the exact string `true` before constructing an
+entity to publish its values under stable names such as
+`etler.pipeline.my-pipeline.done.counter`. Global registration is opt-in because
+`expvar` entries cannot be removed. A later entity with the same type and name
+reuses the same published objects; its construction sets the shared status to
+`created` and increments the shared created counter, while other shared values
+retain their prior contents.
 
 ## Upgrading from v3
 
-The import path changes to `github.com/thalesfsp/etler/v4`, and the module now
-requires Go 1.25. Beyond that:
+Change imports to `github.com/thalesfsp/etler/v4` and use Go 1.25 or newer.
+Then make each applicable migration below:
 
-- `OnFinished` and `Async` are no longer exported struct fields — use the
-  `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
-  signatures are unchanged.
-- The CSV loader now maps struct fields by `csv:"..."` tag instead of
-  `json:"..."`, matching the CSV converter. In v3, `encoding/json` matched
-  untagged fields case-insensitively; v4 does not. As a required migration
-  step, add `csv:"..."` tags wherever a CSV header differs in case or name from
-  its Go field. Plain `int`, `float64` and `bool` fields decode directly —
-  remove the old `json:"age,string"` workaround.
-  **Numeric conversion is gocsv's and is permissive, not range-safe:** `010`
-  decodes as `8`, `1_0` as `10`, `127.9` into an integer as `127`, and
-  out-of-range values may wrap or become infinite. If you need a syntax or
-  range guarantee, decode into a `string` field and parse it yourself. Output
-  types using gocsv's `csv[]` slice expansion are not supported.
-- The storage constructors take their own option type. Entity options that used
-  to be passed directly must now be wrapped:
-  `storage.New[Item](s, "target", storage.WithConverterOptions(opt))` — and
-  `WithProcessorOptions` for the processor equivalent.
-- Storage writes derive a **stable** id from each item instead of a fresh UUID
-  per attempt, so a retry reuses the same key. Whether that overwrites or is
-  rejected is the backend's `Create` semantics — etler guarantees the key, not
-  the upsert. Stability assumes your item's own extension points are
-  deterministic: a `fmt.Stringer` id or a custom `MarshalJSON` that varies
-  between calls will produce a varying id. Two structurally identical items therefore share an id; pass
-  `WithIDFunc` or `WithIDFieldName` if they must be distinct.
-- `processor.New("")` returns an error; a name is required.
+- **Replace direct field access.** `OnFinished` is no longer exported on
+  `Pipeline`, `Stage`, `Processor`, `Converter`, or `Loader`; use
+  `GetOnFinished` and `SetOnFinished`. `Processor.Async` is also unexported; use
+  `GetAsync` and `SetAsync`. The accessors keep their v3 signatures. Because
+  `Async` is unexported, it no longer appears in processor JSON.
+- **Replace unkeyed entity literals with constructors.** `Stage`, `Processor`,
+  `Converter`, and `Loader` gained unexported mutex fields, so their unkeyed
+  composite literals no longer compile. Use their `New` factories.
+- **Update CSV field mapping and validate numeric input explicitly.** The v4
+  loader maps with gocsv and `csv:"..."` tags instead of converting rows through
+  JSON and `json:"..."` tags. Default matching is case-sensitive but not
+  byte-exact: `Name` also matches a header with surrounding whitespace or any
+  U+200B, U+200C, U+200D, or U+FEFF zero-width characters removed. A
+  process-wide `gocsv.SetHeaderNormalizer` applies to field keys and headers and
+  can make matching case-insensitive. Add explicit `csv` tags wherever the
+  accepted header spelling must be unambiguous.
 
-See [CHANGELOG.md](CHANGELOG.md) for the full list.
+  Plain `int`, `float64`, and `bool` fields now decode directly, so remove the
+  old `json:"age,string"` workaround. Numeric conversion remains gocsv's
+  permissive, not range-safe conversion: `010` decodes as `8`, `1_0` as `10`,
+  `127.9` into an integer as `127`, and out-of-range values may wrap or become
+  infinite. Decode into a `string` and parse it yourself when syntax or range
+  matters. Tabs in quoted values are now preserved; callers that relied on v3
+  sanitizing them must strip them explicitly.
+
+  Loading and writing are not symmetric. Writing calls `gocsv.MarshalString`
+  through gocsv's writer factory and supports gocsv's `csv[]` expansion.
+  Loading strips one leading UTF-8 BOM, constructs `encoding/csv.NewReader`
+  directly, and rejects output types that use `csv[]`; a host-configured gocsv
+  reader factory therefore does not affect this loader. The loader does use
+  gocsv's tag name, tag separator, field combiner, header normalizer, and
+  duplicate-header settings; `gocsv.FailIfUnmatchedStructTags` does not affect
+  it.
+- **Wrap options passed to storage constructors.** Storage constructors now
+  take their own option types. Use
+  `converters/storage.WithConverterOptions(opt)` or
+  `processors/storage.WithProcessorOptions(opt)` for options that configure the
+  embedded entity.
+- **Account for deterministic storage IDs.** Resolution order is
+  `WithIDFunc`, then the configured or default `ID`/`Id` field, then a SHA-256
+  hash of the item's JSON. Supported ID fields are strings and signed or
+  unsigned integers except `uintptr`, after pointer/interface dereferencing.
+  A `fmt.Stringer`-only ID is ignored, `String()` is never called, and resolution
+  falls through to the JSON content hash. Equal JSON content shares an ID. For
+  distinct keys, give each logical record a stable unique scalar field and
+  select it with `WithIDFieldName`, or provide a deterministic `WithIDFunc`.
+
+  The built-in field and hash paths are stable for stable input. A custom
+  `WithIDFunc` or nondeterministic `MarshalJSON` can produce a different key on
+  retry. Etler guarantees only the resolved key; idempotence still depends on
+  the backend's `Create` behavior.
+- **Give every processor a name.** `processor.New("")` now returns an error.
+- **Do not rely on overlapping runs of one pipeline.** Concurrent `Run` calls on
+  one `Pipeline` are now serialized. If intentional overlap is required, use
+  separate pipeline instances and do not share a `Stage` instance between them.
+  `OnFinished` runs after serialization is released, so callbacks can still
+  overlap.
+- **Read pause state separately from lifecycle status.** `GetStatus` reports
+  `created`, `running`, `done`, or `failed` and never reports `paused`.
+  `GetPaused` is the pause-controller state, and `SetPause` changes only that
+  controller. A paused pipeline can legitimately report a running lifecycle
+  while its next processor waits for resume.
+- **Pass a nonblank converter storage target.**
+  `converters/storage.New` now rejects an empty or whitespace-only target,
+  matching the processor storage implementation.
+- **Remove calls to `Pipeline.UpdateObservability`.** The exported method was
+  removed with no public replacement. `Pipeline.Run` still updates lifecycle
+  status, counters, progress, and duration internally and, after a successful
+  run releases serialization, invokes `OnFinished`. Custom execution paths must
+  maintain their own observability and callback behavior.
+
+See [CHANGELOG.md](CHANGELOG.md) for the release record.
 
 ## Architectural Modularity and Flexibility
 
-ETLer is designed with architectural modularity and flexibility in mind, leveraging Go's powerful features to create a highly extensible and customizable ETL framework.
-
-The framework is built around a set of core interfaces, such as IPipeline, IStage, IProcessor, IConverter, and ILoader, which define the contracts for the various components of an ETL pipeline. These interfaces provide a clear separation of concerns and allow for easy composition and integration of custom implementations.
-
-The framework provides optmized and default implementations for each component, such as Pipeline, Stage, Processor, Converter, and Loader, which can be used as-is or extended to meet specific requirements.
-
-The use of Go's generic types enables the framework to handle various data types seamlessly. ETLer leverages generics to define type-safe data processing functions, making the framework highly adaptable to different data scenarios without sacrificing type safety.
-
-ETLer also embraces the functional options pattern for configuration and customization. This pattern allows developers to configure pipeline components using a fluent and expressive syntax, providing a clean and flexible way to customize behavior without modifying the core structures.
-
-The modular and flexible architecture of ETLer empowers developers to create highly customized and optimized ETL pipelines tailored to their specific data processing needs. The framework provides a solid foundation for building scalable and maintainable ETL solutions while offering the freedom to extend and adapt the components to fit unique requirements.
+The core interfaces (`IPipeline`, `IStage`, `IProcessor`, `IConverter`, and
+`ILoader`) separate orchestration from data-specific work. Generic function
+types provide the default implementations, while functional options configure
+callbacks and execution behavior. This keeps ordinary transformations small and
+testable while allowing callers to replace a complete component when its
+contract is preserved.
