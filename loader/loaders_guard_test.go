@@ -62,6 +62,10 @@ type loaderValueGuard struct {
 }
 
 type loaderMissingImplementationGuard struct {
+	ILoader[string, []int]
+}
+
+type loaderTaggedMissingImplementationGuard struct {
 	ILoader[string, []int] `validate:"required"`
 }
 
@@ -198,24 +202,41 @@ func TestIsNilOptionResult_loaderValues(t *testing.T) {
 	}
 }
 
-func TestNew_validatesOptionResultBeforeMetricGetters(t *testing.T) {
-	var constructorErr error
+func TestNew_rejectsMissingEmbeddedImplementationBeforeMetricGetters(t *testing.T) {
+	tests := []struct {
+		name  string
+		value ILoader[string, []int]
+	}{
+		{
+			name:  "untagged",
+			value: &loaderMissingImplementationGuard{},
+		},
+		{
+			name:  "tagged",
+			value: &loaderTaggedMissingImplementationGuard{},
+		},
+	}
 
-	assert.NotPanics(t, func() {
-		l, err := New(
-			"loader-structural-validation-first",
-			"loader structural validation first",
-			func(_ context.Context, in string) ([]int, error) {
-				return []int{len(in)}, nil
-			},
-			func(ILoader[string, []int]) ILoader[string, []int] {
-				return &loaderMissingImplementationGuard{}
-			},
-		)
-		constructorErr = err
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var constructorErr error
 
-		assert.Nil(t, l)
-	})
-	require.Error(t, constructorErr)
-	assert.Contains(t, constructorErr.Error(), "invalid struct")
+			assert.NotPanics(t, func() {
+				l, err := New(
+					"loader-missing-implementation-"+tt.name,
+					"loader missing implementation",
+					func(_ context.Context, in string) ([]int, error) {
+						return []int{len(in)}, nil
+					},
+					func(ILoader[string, []int]) ILoader[string, []int] {
+						return tt.value
+					},
+				)
+				constructorErr = err
+
+				assert.Nil(t, l)
+			})
+			require.EqualError(t, constructorErr, "loader option result required")
+		})
+	}
 }

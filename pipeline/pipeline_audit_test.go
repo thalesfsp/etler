@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +16,101 @@ import (
 	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/status"
 )
+
+func TestPipeline_concurrentRunsAreSerialized(t *testing.T) {
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 2)
+
+	var (
+		inFlight    atomic.Int32
+		maxInFlight atomic.Int32
+	)
+
+	blocking, err := processor.New(
+		"serialized-run-audit-processor",
+		"blocks concurrent pipeline runs",
+		func(_ context.Context, processingData []int) ([]int, error) {
+			current := inFlight.Add(1)
+			defer inFlight.Add(-1)
+
+			for {
+				maximum := maxInFlight.Load()
+				if current <= maximum || maxInFlight.CompareAndSwap(maximum, current) {
+					break
+				}
+			}
+
+			entered <- struct{}{}
+			<-gate
+
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	blockingStage, err := stage.New(
+		"serialized-run-audit-stage",
+		"contains a blocking processor",
+		converter.MustDefault(
+			func(_ context.Context, in int) (int, error) {
+				return in, nil
+			},
+		),
+		blocking,
+	)
+	require.NoError(t, err)
+
+	p, err := New(
+		"serialized-run-audit",
+		"serializes concurrent runs",
+		false,
+		blockingStage,
+	)
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	runs := make(chan error, 2)
+
+	for range 2 {
+		go func() {
+			<-start
+
+			_, runErr := p.Run(context.Background(), []int{1})
+			runs <- runErr
+		}()
+	}
+
+	close(start)
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Run did not enter the blocking processor")
+	}
+
+	assert.Never(
+		t,
+		func() bool {
+			return maxInFlight.Load() > 1
+		},
+		100*time.Millisecond,
+		time.Millisecond,
+		"concurrent Run calls entered the processor together",
+	)
+
+	close(gate)
+
+	for range 2 {
+		select {
+		case runErr := <-runs:
+			require.NoError(t, runErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("serialized Run did not complete after the gate opened")
+		}
+	}
+
+	assert.Equal(t, int32(1), maxInFlight.Load())
+}
 
 func TestPipeline_concurrentRunPauseAndStatusAccess(t *testing.T) {
 	const (

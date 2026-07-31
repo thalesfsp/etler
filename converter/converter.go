@@ -238,10 +238,10 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 //////
 
 // New creates a converter. It applies options in order, retains each returned
-// implementation, and then validates the result. Nil options and results are
-// rejected. Structural validation runs before lifecycle metric getters; the
-// final implementation must expose non-nil lifecycle metrics. fn must be safe
-// for concurrent use.
+// implementation, and then validates the result. Nil options, results, and
+// embedded implementations are rejected. Structural validation runs before
+// lifecycle metric getters; the final implementation must expose non-nil
+// lifecycle metrics. fn must be safe for concurrent use.
 func New[In, Out any](
 	name, description string,
 	fn Convert[In, Out],
@@ -306,20 +306,51 @@ func New[In, Out any](
 	return c, nil
 }
 
-// isNilOptionResult detects nil interfaces and interfaces holding nil values.
+// isNilOptionResult detects nil option results and nil embedded converter
+// implementations without depending on validation tags.
 func isNilOptionResult[In, Out any](c IConverter[In, Out]) bool {
 	if c == nil {
 		return true
 	}
 
-	value := reflect.ValueOf(c)
+	isNil := func(value reflect.Value) bool {
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			return value.IsNil()
+		default:
+			return false
+		}
+	}
 
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
+	value := reflect.ValueOf(c)
+	if isNil(value) {
+		return true
+	}
+
+	value = reflect.Indirect(value)
+	if value.Kind() != reflect.Struct {
 		return false
 	}
+
+	implementationType := reflect.TypeFor[IConverter[In, Out]]()
+
+	for index := range value.NumField() {
+		fieldType := value.Type().Field(index)
+		if !fieldType.Anonymous || !fieldType.Type.Implements(implementationType) {
+			continue
+		}
+
+		field := value.Field(index)
+		if isNil(field) {
+			return true
+		}
+
+		if field.Kind() == reflect.Interface && isNil(field.Elem()) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // validateOptionMetrics ensures options retain the metrics dereferenced by
