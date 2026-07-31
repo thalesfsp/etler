@@ -142,3 +142,33 @@ func TestLoader_error_updatesMetricsAndPropagatesCause(t *testing.T) {
 	assert.Equal(t, int64(1), failing.GetCounterFailed().Value())
 	assert.Equal(t, int64(0), failing.GetCounterDone().Value())
 }
+
+// Completion callback time is not part of the load duration.
+func TestLoader_durationExcludesOnFinished(t *testing.T) {
+	const (
+		callbackDelay = 500 * time.Millisecond
+		maxDuration   = 250 * time.Millisecond
+	)
+
+	callbackCalls := 0
+
+	l, err := New(
+		"duration-excludes-onfinished-loader",
+		"records only load duration",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		WithOnFinished(func(ctx context.Context, l ILoader[int, int], in int, out int) {
+			callbackCalls++
+			time.Sleep(callbackDelay)
+		}),
+	)
+	require.NoError(t, err)
+
+	_, err = l.Run(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, callbackCalls, "OnFinished must run exactly once")
+
+	duration := time.Duration(l.GetDuration().Value()) * time.Millisecond
+	require.Less(t, duration, maxDuration, "duration must exclude completion callback")
+}

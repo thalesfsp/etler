@@ -201,14 +201,14 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	// Increment the done counter.
 	c.GetCounterDone().Add(1)
 
+	// Set duration.
+	c.GetDuration().Set(time.Since(now).Milliseconds())
+
 	// Run onEvent callback.
 	onFinished := c.GetOnFinished()
 	if onFinished != nil {
 		onFinished(ctx, c, in, out)
 	}
-
-	// Set duration.
-	c.GetDuration().Set(time.Since(now).Milliseconds())
 
 	// Print the stage's status.
 	c.GetLogger().PrintWithOptions(

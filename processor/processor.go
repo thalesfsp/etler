@@ -286,6 +286,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
+	// Set duration.
+	p.GetDuration().Set(time.Since(now).Milliseconds())
+
 	// Run onEvent callback with the original input and the processed output.
 	onFinished := p.GetOnFinished()
 	if onFinished != nil {
@@ -297,9 +300,6 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 
 	// Increment the done counter.
 	p.GetCounterDone().Add(1)
-
-	// Set duration.
-	p.GetDuration().Set(time.Since(now).Milliseconds())
 
 	// Print the stage's status.
 	if logging.Admits(p.GetLogger(), level.Debug) {

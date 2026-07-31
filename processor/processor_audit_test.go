@@ -401,3 +401,33 @@ func TestProcessor_pause_ctxDeadline_isInterrupted(t *testing.T) {
 		t.Fatal("Run did not unblock after its context deadline while paused")
 	}
 }
+
+// Completion callback time is not part of the transform duration.
+func TestProcessor_durationExcludesOnFinished(t *testing.T) {
+	const (
+		callbackDelay = 500 * time.Millisecond
+		maxDuration   = 250 * time.Millisecond
+	)
+
+	callbackCalls := 0
+
+	p, err := New(
+		"duration-excludes-onfinished-processor",
+		"records only transform duration",
+		func(ctx context.Context, in []int) ([]int, error) {
+			return in, nil
+		},
+		WithOnFinished(func(ctx context.Context, p IProcessor[int], in []int, out []int) {
+			callbackCalls++
+			time.Sleep(callbackDelay)
+		}),
+	)
+	require.NoError(t, err)
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.NoError(t, err)
+	require.Equal(t, 1, callbackCalls, "OnFinished must run exactly once")
+
+	duration := time.Duration(p.GetDuration().Value()) * time.Millisecond
+	require.Less(t, duration, maxDuration, "duration must exclude completion callback")
+}

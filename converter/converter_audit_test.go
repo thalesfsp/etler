@@ -186,3 +186,33 @@ func TestConverter_onFinished_receivesInAndOut(t *testing.T) {
 	assert.Equal(t, 21, gotIn)
 	assert.Equal(t, 42, gotOut)
 }
+
+// Completion callback time is not part of the conversion duration.
+func TestConverter_durationExcludesOnFinished(t *testing.T) {
+	const (
+		callbackDelay = 500 * time.Millisecond
+		maxDuration   = 250 * time.Millisecond
+	)
+
+	callbackCalls := 0
+
+	conv, err := New(
+		"duration-excludes-onfinished-converter",
+		"records only conversion duration",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		WithOnFinished(func(ctx context.Context, c IConverter[int, int], in int, out int) {
+			callbackCalls++
+			time.Sleep(callbackDelay)
+		}),
+	)
+	require.NoError(t, err)
+
+	_, err = conv.Run(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, callbackCalls, "OnFinished must run exactly once")
+
+	duration := time.Duration(conv.GetDuration().Value()) * time.Millisecond
+	require.Less(t, duration, maxDuration, "duration must exclude completion callback")
+}
