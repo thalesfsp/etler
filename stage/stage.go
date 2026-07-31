@@ -462,22 +462,23 @@ func New[ProcessingData, ConvertedData any](
 		CreatedAt:   time.Now(),
 		Name:        name,
 		Description: description,
-
-		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
-		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
-		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
-		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-
-		Duration:        metrics.NewIntWithPattern(Type, name, "duration"),
-		Progress:        metrics.NewIntWithPattern(Type, name, "progress"),
-		ProgressPercent: metrics.NewStringWithPattern(Type, name, "progressPercent"),
-		Status:          metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
-	// Validation.
+	// Validate caller-supplied fields before constructing metrics because
+	// published expvars cannot be removed.
 	if err := validation.Validate(s); err != nil {
 		return nil, err
 	}
+
+	s.CounterCreated = metrics.NewIntWithPattern(Type, name, status.Created)
+	s.CounterDone = metrics.NewIntWithPattern(Type, name, status.Done)
+	s.CounterFailed = metrics.NewIntWithPattern(Type, name, status.Failed)
+	s.CounterRunning = metrics.NewIntWithPattern(Type, name, status.Runnning)
+
+	s.Duration = metrics.NewIntWithPattern(Type, name, "duration")
+	s.Progress = metrics.NewIntWithPattern(Type, name, "progress")
+	s.ProgressPercent = metrics.NewStringWithPattern(Type, name, "progressPercent")
+	s.Status = metrics.NewStringWithPattern(Type, name, status.Name)
 
 	//////
 	// Observability: tracing, metrics, status, logging, etc.

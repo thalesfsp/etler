@@ -254,29 +254,39 @@ func New[In, Out any](
 		return nil, err
 	}
 
-	var c ILoader[In, Out] = &Loader[In, Out]{
+	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("loader option")
+		}
+	}
+
+	base := &Loader[In, Out]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 
 		CreatedAt:   time.Now(),
 		Name:        name,
 		Description: description,
-
-		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
-		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
-		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
-		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-
-		Duration: metrics.NewIntWithPattern(Type, name, "duration"),
-		Status:   metrics.NewStringWithPattern(Type, name, status.Name),
 	}
+
+	// Validate caller-supplied fields before constructing metrics because
+	// published expvars cannot be removed.
+	if err := validation.Validate(base); err != nil {
+		return nil, err
+	}
+
+	base.CounterCreated = metrics.NewIntWithPattern(Type, name, status.Created)
+	base.CounterDone = metrics.NewIntWithPattern(Type, name, status.Done)
+	base.CounterFailed = metrics.NewIntWithPattern(Type, name, status.Failed)
+	base.CounterRunning = metrics.NewIntWithPattern(Type, name, status.Runnning)
+
+	base.Duration = metrics.NewIntWithPattern(Type, name, "duration")
+	base.Status = metrics.NewStringWithPattern(Type, name, status.Name)
+
+	var c ILoader[In, Out] = base
 
 	// Apply options.
 	for _, opt := range opts {
-		if opt == nil {
-			return nil, customerror.NewRequiredError("loader option")
-		}
-
 		c = opt(c)
 		if c == nil {
 			return nil, customerror.NewRequiredError("loader option result")

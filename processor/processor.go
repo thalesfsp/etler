@@ -344,30 +344,40 @@ func New[ProcessingData any](
 		return nil, err
 	}
 
-	var p IProcessor[ProcessingData] = &Processor[ProcessingData]{
+	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("processor option")
+		}
+	}
+
+	base := &Processor[ProcessingData]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 
 		CreatedAt:   time.Now(),
 		Name:        name,
 		Description: description,
-
-		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
-		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
-		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
-		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-
-		CounterInterrupted: metrics.NewIntWithPattern(Type, name, status.Interrupted),
-		Duration:           metrics.NewIntWithPattern(Type, name, "duration"),
-		Status:             metrics.NewStringWithPattern(Type, name, status.Name),
 	}
+
+	// Validate caller-supplied fields before constructing metrics because
+	// published expvars cannot be removed.
+	if err := validation.Validate(base); err != nil {
+		return nil, err
+	}
+
+	base.CounterCreated = metrics.NewIntWithPattern(Type, name, status.Created)
+	base.CounterDone = metrics.NewIntWithPattern(Type, name, status.Done)
+	base.CounterFailed = metrics.NewIntWithPattern(Type, name, status.Failed)
+	base.CounterRunning = metrics.NewIntWithPattern(Type, name, status.Runnning)
+
+	base.CounterInterrupted = metrics.NewIntWithPattern(Type, name, status.Interrupted)
+	base.Duration = metrics.NewIntWithPattern(Type, name, "duration")
+	base.Status = metrics.NewStringWithPattern(Type, name, status.Name)
+
+	var p IProcessor[ProcessingData] = base
 
 	// Apply options.
 	for _, opt := range opts {
-		if opt == nil {
-			return nil, customerror.NewRequiredError("processor option")
-		}
-
 		p = opt(p)
 		if p == nil {
 			return nil, customerror.NewRequiredError("processor option result")
