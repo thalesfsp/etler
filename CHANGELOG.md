@@ -75,10 +75,14 @@ brings statement coverage to 99.4%.
   stack overflow or memory exhaustion, and neither is recoverable.
   The walk is a deliberate *superset* of gocsv's own traversal — it may reject a
   type gocsv could technically load, but it can never miss a cycle that kills the
-  process. It does not bound a `csv[]` count on a slice, where the field count is
-  the developer's own tag rather than input data: gocsv materialises that many
-  entries eagerly, so an absurd count exhausts memory. Array counts are bounded
-  by the array. A field whose type implements `MarshalCSV`, `MarshalText`,
+  process. Two things it does not bound, both driven by the type's own tags
+  rather than by input data. A `csv[]` count on a slice: gocsv materialises that
+  many entries eagerly, so an absurd count exhausts memory (array counts are
+  bounded by the array). And the number of names a field carries: gocsv builds
+  the cartesian product of a nested field's names with its parents', so several
+  comma-separated names repeated down several levels of nesting allocates their
+  product — six names at six levels exhausts a gigabyte. One name per field costs
+  nothing. A field whose type implements `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed. A type implementing only `encoding.TextUnmarshaler` is
   **not** a leaf, because gocsv descends into it. Anonymous struct fields are

@@ -217,10 +217,14 @@ Then make each applicable migration below:
 
   Cycle rejection walks a deliberate *superset* of gocsv's own traversal: it may
   reject a type gocsv could technically load, but it can never miss a cycle that
-  kills the process. It does not bound a `csv[]` count on a slice — that count is
-  your own tag rather than input data, and gocsv materialises that many entries
-  eagerly, so an absurd count exhausts memory. Array counts are bounded by the
-  array. A field type implementing `MarshalCSV`, `MarshalText`,
+  kills the process. Two things it does not bound, both driven by your own tags
+  rather than by input data. A `csv[]` count on a slice: gocsv materialises that
+  many entries eagerly, so an absurd count exhausts memory (array counts are
+  bounded by the array). And the number of names a field carries: gocsv builds
+  the cartesian product of a nested field's names with its parents', so several
+  comma-separated names repeated down several levels of nesting allocates their
+  product — six names at six levels exhausts a gigabyte. One name per field, the
+  ordinary case, costs nothing. A field type implementing `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed, so `**T` is a leaf. A type implementing only
   `encoding.TextUnmarshaler` is **not** a leaf, because gocsv descends into it.
