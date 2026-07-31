@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/thalesfsp/etler/v4/loader"
+	"github.com/thalesfsp/etler/v4/task"
 )
 
 type auditRow struct {
@@ -52,10 +53,28 @@ func TestLoad_emptyInput_returnsMissingHeaderError(t *testing.T) {
 	})
 }
 
-func TestLoad_headerOnly_returnsNilSlice(t *testing.T) {
+func TestLoad_headerOnly_returnsEmptyNonNilSlice(t *testing.T) {
 	out, err := Load[[]auditRow](strings.NewReader("Name,Age,Score,Active\n"))
 	require.NoError(t, err)
-	assert.Nil(t, out)
+	assert.NotNil(t, out)
+	assert.Empty(t, out)
+}
+
+func TestLoad_headerOnly_composesWithTask(t *testing.T) {
+	out, err := Load[[]auditRow](strings.NewReader("Name,Age,Score,Active\n"))
+	require.NoError(t, err)
+
+	tsk, err := task.New[auditRow, auditRow](out)
+	require.NoError(t, err)
+	assert.NotNil(t, tsk.ProcessingData)
+	assert.Empty(t, tsk.ProcessingData)
+}
+
+func TestLoad_headerOnly_pointerRowsReturnsEmptyNonNilSlice(t *testing.T) {
+	out, err := Load[[]*auditRow](strings.NewReader("Name,Age,Score,Active\n"))
+	require.NoError(t, err)
+	assert.NotNil(t, out)
+	assert.Empty(t, out)
 }
 
 func TestLoad_malformedCSV_returnsError(t *testing.T) {
