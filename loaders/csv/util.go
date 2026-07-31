@@ -109,6 +109,7 @@ func Load[Out any](in io.Reader) (Out, error) {
 	}
 	var out Out
 	outValue := reflect.ValueOf(&out).Elem()
+	outValue.Set(reflect.MakeSlice(outType, 0, 0))
 	for {
 		row, err := callGocsv(outType, unmarshaller.Read)
 		if errors.Is(err, io.EOF) {
