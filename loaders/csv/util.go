@@ -18,39 +18,33 @@ import (
 )
 
 var (
-	csvUnmarshallerType   = reflect.TypeFor[gocsv.TypeUnmarshaller]()
-	textUnmarshallerType  = reflect.TypeFor[encoding.TextUnmarshaler]()
-	strictIntegerPattern  = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
-	strictUnsignedPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
-	strictFloatPattern    = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?([eE]-?[0-9]+)?$`)
+	csvUnmarshallerType    = reflect.TypeFor[gocsv.TypeUnmarshaller]()
+	textUnmarshallerType   = reflect.TypeFor[encoding.TextUnmarshaler]()
+	decimalIntegerPattern  = regexp.MustCompile(`^[+-]?(0|[1-9][0-9]*)$`)
+	decimalUnsignedPattern = regexp.MustCompile(`^\+?(0|[1-9][0-9]*)$`)
+	decimalFloatPattern    = regexp.MustCompile(`^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 )
 
 type csvField struct {
-	keys    []string
-	name    string
-	typ     reflect.Type
-	tagged  bool
-	partial bool
+	key   string
+	index []int
+	typ   reflect.Type
+	fold  bool
 }
 
 // Load converts CSV data to a slice of structs. Untagged field names match
-// case-insensitively. Exact csv tags win; folded collisions and duplicate exact
-// tags are errors.
+// case-insensitively through gocsv's per-unmarshaller header normalizer; gocsv
+// resolves all field collisions in declaration order. Output types using csv[]
+// slice expansion are unsupported.
 //
-// Numeric fields use strict decimal syntax validated by etler: an optional
-// leading minus and digits, with multi-digit integers forbidden from starting
-// with zero. Floats may add fractional digits and an exponent with an optional
-// minus. A plus sign is not accepted. Other behavior comes from gocsv's
-// Unmarshaller: default= is not
-// applied; omitempty preserves nil pointers; duplicate headers assign in order;
-// unmatched columns are ignored; and missing columns stay zero. TagName,
-// TagSeparator, FieldsCombiner, the header normalizer, FailIfDoubleHeaderNames,
-// and ShouldAlignDuplicateHeadersWithStructFieldOrder influence Load. The CSV
-// reader factory and FailIfUnmatchedStructTags do not.
+// Numeric fields accept ordinary signed decimal input with surrounding
+// whitespace, including decimal fractions and signed exponents for floats, but
+// reject digit separators, non-decimal notation, leading zeroes on multi-digit
+// integers, fractional integers, and values outside the destination width.
+// Other behavior comes from gocsv's Unmarshaller. Its package-level tag,
+// header, and duplicate settings influence Load; its reader factory and
+// FailIfUnmatchedStructTags do not.
 func Load[Out any](in io.Reader) (Out, error) {
-	if isNil(in) {
-		return *new(Out), customerror.NewRequiredError("CSV reader")
-	}
 	outType := reflect.TypeOf((*Out)(nil)).Elem()
 	if outType.Kind() != reflect.Slice {
 		return *new(Out), customerror.NewInvalidError(
@@ -61,9 +55,12 @@ func Load[Out any](in io.Reader) (Out, error) {
 	if rowType.Kind() == reflect.Pointer {
 		rowType = rowType.Elem()
 	}
-	fields, err := inspectCSVFields(rowType, nil, false, nil)
+	fields, err := inspectCSVFields(rowType, "", true, nil)
 	if err != nil {
 		return *new(Out), err
+	}
+	if isNil(in) {
+		return *new(Out), customerror.NewRequiredError("CSV reader")
 	}
 	reader := bufio.NewReader(in)
 	bom := []byte{0xef, 0xbb, 0xbf}
@@ -81,6 +78,10 @@ func Load[Out any](in io.Reader) (Out, error) {
 	if err != nil {
 		return *new(Out), err
 	}
+	records, err := stdcsv.NewReader(bytes.NewReader(source)).ReadAll()
+	if err != nil {
+		return *new(Out), err
+	}
 	csvReader := stdcsv.NewReader(bytes.NewReader(source))
 	prototype := reflect.New(rowType)
 	if outType.Elem().Kind() != reflect.Pointer {
@@ -90,16 +91,13 @@ func Load[Out any](in io.Reader) (Out, error) {
 	if err != nil {
 		return *new(Out), err
 	}
-	headers, err := normalizeCSVHeaders(unmarshaller.Headers, fields)
-	if err != nil {
-		return *new(Out), err
-	}
-	if err := validateNumericValues(source, headers, fields); err != nil {
-		return *new(Out), err
-	}
+	headers := normalizeCSVHeaders(unmarshaller.Headers, fields)
 	if err := unmarshaller.RenormalizeHeaders(func([]string) []string {
 		return headers
 	}); err != nil {
+		return *new(Out), err
+	}
+	if err := validateNumericValues(records, headers, rowType, fields); err != nil {
 		return *new(Out), err
 	}
 	var out Out
@@ -130,7 +128,7 @@ func isNil(value any) bool {
 	}
 }
 
-func inspectCSVFields(rowType reflect.Type, parentKeys []string, parentTagged bool, active map[reflect.Type]struct{}) ([]csvField, error) {
+func inspectCSVFields(rowType reflect.Type, parentKey string, parentFold bool, active map[reflect.Type]struct{}) ([]csvField, error) {
 	if rowType.Kind() != reflect.Struct {
 		return nil, nil
 	}
@@ -148,220 +146,216 @@ func inspectCSVFields(rowType reflect.Type, parentKeys []string, parentTagged bo
 		if !field.IsExported() {
 			continue
 		}
-		keys, tagged, partial, ignored := csvFieldKeys(field)
+		key, fold, ignored := csvFieldName(field)
 		if ignored {
 			continue
 		}
+		if _, expands := field.Tag.Lookup(gocsv.TagName + "[]"); expands &&
+			(field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) {
+			return nil, customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
+		}
 		if field.Anonymous {
-			keys = parentKeys
-			tagged = parentTagged
-		} else if len(parentKeys) > 0 {
-			var combined []string
-			for _, parent := range parentKeys {
-				for _, key := range keys {
-					combined = append(combined, parent+gocsv.FieldsCombiner+key)
-				}
+			key, fold = parentKey, parentFold
+		} else {
+			fold = parentFold && fold
+			if fold && parentKey != "" {
+				key = parentKey + gocsv.FieldsCombiner + key
 			}
-			keys = combined
-			tagged = parentTagged || tagged
 		}
 		fieldType := field.Type
 		if fieldType.Kind() == reflect.Pointer {
 			fieldType = fieldType.Elem()
 		}
 		if fieldType.Kind() == reflect.Struct && !hasCustomUnmarshaller(fieldType) {
-			nested, err := inspectCSVFields(fieldType, keys, tagged, active)
+			nested, err := inspectCSVFields(fieldType, key, fold, active)
 			if err != nil {
 				return nil, err
+			}
+			for index := range nested {
+				nested[index].index = append([]int{field.Index[0]}, nested[index].index...)
 			}
 			fields = append(fields, nested...)
 			continue
 		}
 		if (fieldType.Kind() == reflect.Slice || fieldType.Kind() == reflect.Array) &&
 			fieldType.Elem().Kind() == reflect.Struct {
-			if _, err := inspectCSVFields(fieldType.Elem(), nil, false, active); err != nil {
+			if _, err := inspectCSVFields(fieldType.Elem(), "", true, active); err != nil {
 				return nil, err
 			}
 		}
 		if field.Anonymous {
 			continue
 		}
-		fields = append(fields, csvField{keys, field.Name, field.Type, tagged, partial})
+		fields = append(fields, csvField{key: key, index: []int{field.Index[0]}, typ: field.Type, fold: fold})
 	}
 	return fields, nil
 }
 
-func csvFieldKeys(field reflect.StructField) ([]string, bool, bool, bool) {
+func csvFieldName(field reflect.StructField) (string, bool, bool) {
 	parts := strings.Split(field.Tag.Get(gocsv.TagName), gocsv.TagSeparator)
 	keys := make([]string, 0, len(parts))
-	partial := false
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		switch {
-		case strings.HasPrefix(part, "partial"):
-			partial = true
-		case part == "omitempty", strings.HasPrefix(part, "default="):
+		case strings.HasPrefix(part, "partial"), part == "omitempty", strings.HasPrefix(part, "default="):
 		default:
 			keys = append(keys, part)
 		}
 	}
 	if len(keys) == 1 && keys[0] == "-" {
-		return nil, false, false, true
+		return "", false, true
 	}
 	if len(keys) == 0 || keys[0] == "" {
-		return []string{field.Name}, false, partial, false
+		return field.Name, true, false
 	}
-	return keys, true, partial, false
+	return "", false, false
 }
 
 func hasCustomUnmarshaller(typ reflect.Type) bool {
 	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
-	return typ.Implements(csvUnmarshallerType) ||
-		typ.Implements(textUnmarshallerType) ||
-		reflect.PointerTo(typ).Implements(csvUnmarshallerType) ||
-		reflect.PointerTo(typ).Implements(textUnmarshallerType)
+	return typ.Implements(csvUnmarshallerType) || typ.Implements(textUnmarshallerType) ||
+		reflect.PointerTo(typ).Implements(csvUnmarshallerType) || reflect.PointerTo(typ).Implements(textUnmarshallerType)
 }
 
-func normalizeCSVHeaders(headers []string, fields []csvField) ([]string, error) {
+func normalizeCSVHeaders(headers []string, fields []csvField) []string {
 	normalized := append([]string(nil), headers...)
-	for index, header := range headers {
-		var exact, folded []csvField
+	for index, header := range normalized {
 		for _, field := range fields {
-			for _, key := range field.keys {
-				if field.tagged && header == key {
-					exact = append(exact, field)
-					break
-				}
-				if !field.tagged && strings.EqualFold(header, key) {
-					folded = append(folded, field)
-					break
-				}
-			}
-		}
-		matches := folded
-		if len(exact) > 0 {
-			matches = exact
-			for _, field := range folded {
-				for _, key := range field.keys {
-					if header == key {
-						matches = append(matches, field)
-						break
-					}
-				}
-			}
-		}
-		if len(matches) > 1 {
-			return nil, ambiguousHeaderError(header, matches)
-		}
-		if len(matches) == 1 {
-			for _, key := range matches[0].keys {
-				if header == key || strings.EqualFold(header, key) {
-					normalized[index] = key
-					break
-				}
-			}
-		}
-	}
-	return normalized, nil
-}
-
-func ambiguousHeaderError(header string, fields []csvField) error {
-	names := make([]string, len(fields))
-	for index := range fields {
-		names[index] = fields[index].name
-	}
-	return fmt.Errorf("ambiguous CSV header %q matches fields %s", header, strings.Join(names, ", "))
-}
-
-func validateNumericValues(source []byte, headers []string, fields []csvField) error {
-	records, err := stdcsv.NewReader(bytes.NewReader(source)).ReadAll()
-	if err != nil || len(records) < 2 {
-		return err
-	}
-	headerFields := make([]*csvField, len(headers))
-	for column, header := range headers {
-		for tagged := true; ; tagged = false {
-			for index := range fields {
-				if fields[index].tagged == tagged && matchesGocsvHeader(header, fields[index]) {
-					headerFields[column] = &fields[index]
-					break
-				}
-			}
-			if headerFields[column] != nil || !tagged {
+			if field.fold && strings.EqualFold(header, field.key) {
+				normalized[index] = field.key
 				break
 			}
 		}
 	}
-	for rowIndex, record := range records[1:] {
+	return normalized
+}
+
+func validateNumericValues(
+	records [][]string,
+	headers []string,
+	rowType reflect.Type,
+	fields []csvField,
+) error {
+	if len(records) < 2 {
+		return nil
+	}
+	headerFields := make([]*csvField, len(headers))
+	for column := range headers {
+		field, err := gocsvNumericField(headers[:column+1], rowType, fields)
+		if err != nil {
+			return err
+		}
+		headerFields[column] = field
+	}
+	for _, record := range records[1:] {
 		for column, value := range record {
 			if column >= len(headerFields) || headerFields[column] == nil {
 				continue
 			}
 			field := headerFields[column]
-			if hasCustomUnmarshaller(field.typ) {
-				continue
-			}
 			valueErr := numericValueError(value, field.typ)
 			if valueErr == nil {
 				continue
 			}
-			message := fmt.Sprintf("value %q in column %q", value, records[0][column])
+			typ := baseType(field.typ)
 			if errors.Is(valueErr, strconv.ErrRange) {
-				message += fmt.Sprintf(" is out of range for %s", field.typ)
-			} else {
-				message += fmt.Sprintf(" does not use strict decimal syntax for %s", field.typ)
+				return fmt.Errorf("value %q in column %q is out of range for %s", value, records[0][column], typ)
 			}
-			return &stdcsv.ParseError{
-				StartLine: rowIndex + 2,
-				Line:      rowIndex + 2,
-				Column:    column + 1,
-				Err:       errors.New(message),
-			}
+			return fmt.Errorf("value %q in column %q is not valid decimal input for %s", value, records[0][column], typ)
 		}
 	}
 	return nil
 }
 
-func matchesGocsvHeader(header string, field csvField) bool {
-	withoutZeroWidth := strings.Map(func(character rune) rune {
-		if strings.ContainsRune("\u200B\uFEFF\u200D\u200C", character) {
-			return -1
-		}
-		return character
-	}, header)
-	for _, key := range field.keys {
-		if header == key || strings.TrimSpace(header) == key ||
-			field.partial && strings.Contains(header, key) || withoutZeroWidth == key {
-			return true
+func gocsvNumericField(headers []string, rowType reflect.Type, fields []csvField) (*csvField, error) {
+	values := make([]string, len(headers))
+	values[len(values)-1] = "1"
+	var probeSource bytes.Buffer
+	writer := stdcsv.NewWriter(&probeSource)
+	writer.WriteAll([][]string{headers, values})
+	unmarshaller, err := gocsv.NewUnmarshaller(stdcsv.NewReader(&probeSource), reflect.New(rowType).Elem().Interface())
+	if err != nil {
+		return nil, err
+	}
+	if err := unmarshaller.RenormalizeHeaders(func([]string) []string {
+		return headers
+	}); err != nil {
+		return nil, err
+	}
+	row, err := unmarshaller.Read()
+	if err != nil {
+		return nil, nil
+	}
+	for index := range fields {
+		if !hasCustomUnmarshaller(fields[index].typ) &&
+			numericOneAt(reflect.ValueOf(row), fields[index].index) {
+			return &fields[index], nil
 		}
 	}
-	return false
+	return nil, nil
 }
 
-func numericValueError(value string, typ reflect.Type) error {
+func numericOneAt(value reflect.Value, index []int) bool {
+	for _, fieldIndex := range index {
+		for value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return false
+			}
+			value = value.Elem()
+		}
+		if value.Kind() != reflect.Struct {
+			return false
+		}
+		value = value.Field(fieldIndex)
+	}
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return false
+		}
+		value = value.Elem()
+	}
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return value.Int() == 1
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return value.Uint() == 1
+	case reflect.Float32, reflect.Float64:
+		return value.Float() == 1
+	default:
+		return false
+	}
+}
+
+func baseType(typ reflect.Type) reflect.Type {
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
+	return typ
+}
+
+func numericValueError(value string, typ reflect.Type) error {
+	typ = baseType(typ)
+	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
 	}
 	switch typ.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if !strictIntegerPattern.MatchString(value) {
+		if !decimalIntegerPattern.MatchString(value) {
 			return strconv.ErrSyntax
 		}
 		_, err := strconv.ParseInt(value, 10, typ.Bits())
 		return err
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if !strictUnsignedPattern.MatchString(value) {
+		if !decimalUnsignedPattern.MatchString(value) {
 			return strconv.ErrSyntax
 		}
 		_, err := strconv.ParseUint(value, 10, typ.Bits())
 		return err
 	case reflect.Float32, reflect.Float64:
-		if !strictFloatPattern.MatchString(value) {
+		if !decimalFloatPattern.MatchString(value) {
 			return strconv.ErrSyntax
 		}
 		_, err := strconv.ParseFloat(value, typ.Bits())

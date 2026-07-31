@@ -1,12 +1,14 @@
 package csv
 
 import (
+	stdcsv "encoding/csv"
 	"errors"
 	"io"
 	"math"
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,69 +19,116 @@ import (
 
 func TestLoad_rejectsNumericOverflow(t *testing.T) {
 	type testCase struct {
-		name       string
-		inside     string
-		outside    string
-		load       func(string) (any, error)
-		insideWant any
+		name         string
+		inside       string
+		outside      string
+		lowerInside  string
+		lowerOutside string
+		load         func(string) (any, error)
+		insideWant   any
+		lowerWant    any
 	}
 
 	testCases := []testCase{
 		{
-			name:       "int8",
-			inside:     "127",
-			outside:    "128",
-			load:       func(in string) (any, error) { return Load[[]struct{ N int8 }](strings.NewReader(in)) },
-			insideWant: int8(127),
+			name:         "int",
+			inside:       strconv.FormatInt(int64(maxInt()), 10),
+			outside:      strconv.FormatUint(uint64(maxInt())+1, 10),
+			lowerInside:  strconv.FormatInt(int64(minInt()), 10),
+			lowerOutside: intUnderflowValue(),
+			load:         func(in string) (any, error) { return Load[[]struct{ N int }](strings.NewReader(in)) },
+			insideWant:   maxInt(),
+			lowerWant:    minInt(),
 		},
 		{
-			name:       "int16",
-			inside:     "32767",
-			outside:    "32768",
-			load:       func(in string) (any, error) { return Load[[]struct{ N int16 }](strings.NewReader(in)) },
-			insideWant: int16(32767),
+			name:         "int8",
+			inside:       "127",
+			outside:      "128",
+			lowerInside:  "-128",
+			lowerOutside: "-129",
+			load:         func(in string) (any, error) { return Load[[]struct{ N int8 }](strings.NewReader(in)) },
+			insideWant:   int8(127),
+			lowerWant:    int8(-128),
 		},
 		{
-			name:       "int32",
-			inside:     "2147483647",
-			outside:    "2147483648",
-			load:       func(in string) (any, error) { return Load[[]struct{ N int32 }](strings.NewReader(in)) },
-			insideWant: int32(2147483647),
+			name:         "int16",
+			inside:       "32767",
+			outside:      "32768",
+			lowerInside:  "-32768",
+			lowerOutside: "-32769",
+			load:         func(in string) (any, error) { return Load[[]struct{ N int16 }](strings.NewReader(in)) },
+			insideWant:   int16(32767),
+			lowerWant:    int16(-32768),
 		},
 		{
-			name:       "int64",
-			inside:     "9223372036854775807",
-			outside:    "9223372036854775808",
-			load:       func(in string) (any, error) { return Load[[]struct{ N int64 }](strings.NewReader(in)) },
-			insideWant: int64(math.MaxInt64),
+			name:         "int32",
+			inside:       "2147483647",
+			outside:      "2147483648",
+			lowerInside:  "-2147483648",
+			lowerOutside: "-2147483649",
+			load:         func(in string) (any, error) { return Load[[]struct{ N int32 }](strings.NewReader(in)) },
+			insideWant:   int32(2147483647),
+			lowerWant:    int32(-2147483648),
 		},
 		{
-			name:       "uint8",
-			inside:     "255",
-			outside:    "256",
-			load:       func(in string) (any, error) { return Load[[]struct{ N uint8 }](strings.NewReader(in)) },
-			insideWant: uint8(255),
+			name:         "int64",
+			inside:       "9223372036854775807",
+			outside:      "9223372036854775808",
+			lowerInside:  "-9223372036854775808",
+			lowerOutside: "-9223372036854775809",
+			load:         func(in string) (any, error) { return Load[[]struct{ N int64 }](strings.NewReader(in)) },
+			insideWant:   int64(math.MaxInt64),
+			lowerWant:    int64(math.MinInt64),
 		},
 		{
-			name:       "uint16",
-			inside:     "65535",
-			outside:    "65536",
-			load:       func(in string) (any, error) { return Load[[]struct{ N uint16 }](strings.NewReader(in)) },
-			insideWant: uint16(65535),
+			name:         "uint",
+			inside:       strconv.FormatUint(uint64(maxUint()), 10),
+			outside:      uintOverflowValue(),
+			lowerInside:  "0",
+			lowerOutside: "-1",
+			load:         func(in string) (any, error) { return Load[[]struct{ N uint }](strings.NewReader(in)) },
+			insideWant:   maxUint(),
+			lowerWant:    uint(0),
 		},
 		{
-			name:       "uint32",
-			inside:     "4294967295",
-			outside:    "4294967296",
-			load:       func(in string) (any, error) { return Load[[]struct{ N uint32 }](strings.NewReader(in)) },
-			insideWant: uint32(math.MaxUint32),
+			name:         "uint8",
+			inside:       "255",
+			outside:      "256",
+			lowerInside:  "0",
+			lowerOutside: "-1",
+			load:         func(in string) (any, error) { return Load[[]struct{ N uint8 }](strings.NewReader(in)) },
+			insideWant:   uint8(255),
+			lowerWant:    uint8(0),
 		},
 		{
-			name:       "uint64",
-			inside:     "18446744073709551615",
-			outside:    "18446744073709551616",
-			load:       func(in string) (any, error) { return Load[[]struct{ N uint64 }](strings.NewReader(in)) },
-			insideWant: uint64(math.MaxUint64),
+			name:         "uint16",
+			inside:       "65535",
+			outside:      "65536",
+			lowerInside:  "0",
+			lowerOutside: "-1",
+			load:         func(in string) (any, error) { return Load[[]struct{ N uint16 }](strings.NewReader(in)) },
+			insideWant:   uint16(65535),
+			lowerWant:    uint16(0),
+		},
+		{
+			name:         "uint32",
+			inside:       "4294967295",
+			outside:      "4294967296",
+			lowerInside:  "0",
+			lowerOutside: "-1",
+			load:         func(in string) (any, error) { return Load[[]struct{ N uint32 }](strings.NewReader(in)) },
+			insideWant:   uint32(math.MaxUint32),
+			lowerWant:    uint32(0),
+		},
+		{
+			name:         "uint64",
+			inside:       "18446744073709551615",
+			outside:      "18446744073709551616",
+			lowerInside:  "0",
+			lowerOutside: "-1",
+			load:         func(in string) (any, error) { return Load[[]struct{ N uint64 }](strings.NewReader(in)) },
+			insideWant:   uint64(math.MaxUint64),
+			lowerWant:    uint64(0),
 		},
 		{
 			name:       "float32",
@@ -108,6 +157,18 @@ func TestLoad_rejectsNumericOverflow(t *testing.T) {
 			assert.Nil(t, out)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, "out of range")
+
+			if testCase.lowerInside != "" {
+				out, err = testCase.load("N\n" + testCase.lowerInside + "\n")
+				require.NoError(t, err)
+				require.Len(t, out, 1)
+				assert.Equal(t, testCase.lowerWant, firstField(out))
+
+				out, err = testCase.load("N\n" + testCase.lowerOutside + "\n")
+				assert.Nil(t, out)
+				require.Error(t, err)
+				assert.ErrorContains(t, err, testCase.lowerOutside)
+			}
 		})
 	}
 }
@@ -140,15 +201,17 @@ func TestLoad_rejectsNonDecimalIntegerSyntax(t *testing.T) {
 		out, err := Load[[]struct{ N int8 }](strings.NewReader("N\n127.9\n"))
 		assert.Nil(t, out)
 		require.EqualError(t, err,
-			`parse error on line 2, column 1: value "127.9" in column "N" does not use strict decimal syntax for int8`,
+			`value "127.9" in column "N" is not valid decimal input for int8`,
 		)
+		var parseErr *stdcsv.ParseError
+		assert.False(t, errors.As(err, &parseErr))
 	})
 
 	t.Run("leading zero", func(t *testing.T) {
 		out, err := Load[[]struct{ N int }](strings.NewReader("N\n010\n"))
 		assert.Nil(t, out)
 		require.EqualError(t, err,
-			`parse error on line 2, column 1: value "010" in column "N" does not use strict decimal syntax for int`,
+			`value "010" in column "N" is not valid decimal input for int`,
 		)
 	})
 
@@ -156,63 +219,55 @@ func TestLoad_rejectsNonDecimalIntegerSyntax(t *testing.T) {
 		out, err := Load[[]struct{ N int }](strings.NewReader("N\n1_0\n"))
 		assert.Nil(t, out)
 		require.EqualError(t, err,
-			`parse error on line 2, column 1: value "1_0" in column "N" does not use strict decimal syntax for int`,
+			`value "1_0" in column "N" is not valid decimal input for int`,
 		)
 	})
 }
 
-func TestLoad_acceptsStrictDecimalNumericSyntax(t *testing.T) {
+func TestLoad_acceptsOrdinaryDecimalNumericSyntax(t *testing.T) {
 	type row struct {
 		Integer int
 		Float   float64
 	}
 
 	out, err := Load[[]row](strings.NewReader(
-		"Integer,Float\n42,1.5\n-42,-1.5\n0,1e3\n,\n",
+		"Integer,Float\n+42,.5\n 42 ,1.\n-42,1e+3\n0, +1.5 \n,\n",
 	))
 	require.NoError(t, err)
 	require.Equal(t, []row{
-		{Integer: 42, Float: 1.5},
-		{Integer: -42, Float: -1.5},
-		{Float: 1000},
+		{Integer: 42, Float: 0.5},
+		{Integer: 42, Float: 1},
+		{Integer: -42, Float: 1000},
+		{Float: 1.5},
 		{},
 	}, out)
 }
 
 func TestLoad_rejectsOtherNonDecimalNumericSyntax(t *testing.T) {
 	for _, value := range []string{
-		"+42",
 		"-01",
 		"0x10",
 		"0o10",
 		"0b10",
-		" 42",
-		"42 ",
 	} {
 		t.Run("integer "+value, func(t *testing.T) {
 			out, err := Load[[]struct{ N int }](strings.NewReader("N\n" + value + "\n"))
 			assert.Nil(t, out)
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "strict decimal syntax")
+			assert.ErrorContains(t, err, "not valid decimal input")
 		})
 	}
 
 	for _, value := range []string{
-		"+1.5",
 		"1_0.5",
-		" 1.5",
-		"1.5 ",
-		".5",
-		"1.",
 		"NaN",
 		"Inf",
-		"1e+3",
 	} {
 		t.Run("float "+value, func(t *testing.T) {
 			out, err := Load[[]struct{ N float64 }](strings.NewReader("N\n" + value + "\n"))
 			assert.Nil(t, out)
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "strict decimal syntax")
+			assert.ErrorContains(t, err, "not valid decimal input")
 		})
 	}
 }
@@ -250,58 +305,60 @@ func TestLoad_matchesUntaggedFieldsCaseInsensitively(t *testing.T) {
 	})
 }
 
-func TestLoad_resolvesHeaderMatchesDeterministically(t *testing.T) {
-	t.Run("exact tag wins over folded field", func(t *testing.T) {
+func TestLoad_delegatesHeaderResolutionToGocsv(t *testing.T) {
+	t.Run("exact tag declared first wins over identical field key", func(t *testing.T) {
 		type row struct {
-			Tagged string `csv:"name"`
+			Tagged string `csv:"Name"`
 			Name   string
 		}
 
-		out, err := Load[[]row](strings.NewReader("name\nalice\n"))
+		out, err := Load[[]row](strings.NewReader("Name\nalice\n"))
 		require.NoError(t, err)
 		require.Equal(t, []row{{Tagged: "alice"}}, out)
 	})
 
-	t.Run("folded fields are ambiguous", func(t *testing.T) {
+	t.Run("folded collision follows gocsv field order", func(t *testing.T) {
 		type row struct {
 			Foo string
 			FOO string
 		}
 
 		out, err := Load[[]row](strings.NewReader("foo\nalice\n"))
-		assert.Nil(t, out)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, `ambiguous CSV header "foo"`)
-		assert.ErrorContains(t, err, "Foo")
-		assert.ErrorContains(t, err, "FOO")
+		require.NoError(t, err)
+		require.Equal(t, []row{{Foo: "alice"}}, out)
 	})
 
-	t.Run("duplicate exact tags are ambiguous", func(t *testing.T) {
+	t.Run("duplicate exact tags follow gocsv field order", func(t *testing.T) {
 		type row struct {
 			First  string `csv:"name"`
 			Second string `csv:"name"`
 		}
 
 		out, err := Load[[]row](strings.NewReader("name\nalice\n"))
-		assert.Nil(t, out)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, `ambiguous CSV header "name"`)
-		assert.ErrorContains(t, err, "First")
-		assert.ErrorContains(t, err, "Second")
+		require.NoError(t, err)
+		require.Equal(t, []row{{First: "alice"}}, out)
 	})
 
-	t.Run("identical tag and field key are ambiguous", func(t *testing.T) {
+	t.Run("untagged key declared first resolves without ambiguity", func(t *testing.T) {
 		type row struct {
 			Name   string
 			Tagged string `csv:"Name"`
 		}
 
 		out, err := Load[[]row](strings.NewReader("Name\nalice\n"))
-		assert.Nil(t, out)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, `ambiguous CSV header "Name"`)
-		assert.ErrorContains(t, err, "Name")
-		assert.ErrorContains(t, err, "Tagged")
+		require.NoError(t, err)
+		require.Equal(t, []row{{Name: "alice"}}, out)
+	})
+
+	t.Run("partial tag declared first wins over later exact tag", func(t *testing.T) {
+		type row struct {
+			Partial string `csv:"id,partial"`
+			Exact   string `csv:"user_id"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("user_id\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Partial: "alice"}}, out)
 	})
 }
 
@@ -464,6 +521,34 @@ func firstField(value any) any {
 	slice := reflect.ValueOf(value)
 
 	return slice.Index(0).Field(0).Interface()
+}
+
+func maxInt() int {
+	return int(^uint(0) >> 1)
+}
+
+func minInt() int {
+	return -maxInt() - 1
+}
+
+func maxUint() uint {
+	return ^uint(0)
+}
+
+func intUnderflowValue() string {
+	if strconv.IntSize == 64 {
+		return "-9223372036854775809"
+	}
+
+	return "-2147483649"
+}
+
+func uintOverflowValue() string {
+	if strconv.IntSize == 64 {
+		return "18446744073709551616"
+	}
+
+	return "4294967296"
 }
 
 type customInt int

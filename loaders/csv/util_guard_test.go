@@ -3,6 +3,7 @@ package csv
 import (
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,20 +30,19 @@ func TestInspectCSVFields_handlesSupportedFieldShapes(t *testing.T) {
 		Parent  struct {
 			Count uint8
 		}
-		Items []struct {
-			ID int
-		}
 		When time.Time
 	}
 
-	fields, err := inspectCSVFields(reflect.TypeFor[row](), nil, false, nil)
+	fields, err := inspectCSVFields(reflect.TypeFor[row](), "", true, nil)
 	require.NoError(t, err)
 
 	keys := make([]string, 0, len(fields))
 	for _, field := range fields {
-		keys = append(keys, field.keys...)
+		if field.key != "" {
+			keys = append(keys, field.key)
+		}
 	}
-	assert.ElementsMatch(t, []string{"Value", "Parent.Count", "Items", "When"}, keys)
+	assert.ElementsMatch(t, []string{"Value", "Parent.Count", "When"}, keys)
 
 	// An unexported field must never be discovered: reflection cannot set it,
 	// so assigning to one would panic. The literal below also proves the field
@@ -51,13 +51,27 @@ func TestInspectCSVFields_handlesSupportedFieldShapes(t *testing.T) {
 	assert.NotContains(t, keys, "hidden")
 }
 
+func TestLoad_rejectsCSVSliceExpansion(t *testing.T) {
+	type row struct {
+		Items []struct {
+			ID uint8
+		} `csv:"Items" csv[]:"2"`
+	}
+
+	out, err := Load[[]row](strings.NewReader("Items[0].ID\n256\n"))
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
+	assert.ErrorContains(t, err, "Items")
+}
+
 func TestInspectCSVFields_rejectsCycles(t *testing.T) {
-	fields, err := inspectCSVFields(reflect.TypeFor[PointerCycle](), nil, false, nil)
+	fields, err := inspectCSVFields(reflect.TypeFor[PointerCycle](), "", true, nil)
 	assert.Nil(t, fields)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cyclic CSV output type")
 
-	fields, err = inspectCSVFields(reflect.TypeFor[SliceCycle](), nil, false, nil)
+	fields, err = inspectCSVFields(reflect.TypeFor[SliceCycle](), "", true, nil)
 	assert.Nil(t, fields)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cyclic CSV output type")
@@ -65,8 +79,9 @@ func TestInspectCSVFields_rejectsCycles(t *testing.T) {
 
 func TestNumericValueError_validatesSyntaxAndRange(t *testing.T) {
 	assert.NoError(t, numericValueError("", reflect.TypeFor[*int]()))
+	assert.NoError(t, numericValueError(" +42 ", reflect.TypeFor[int]()))
 	assert.NoError(t, numericValueError("255", reflect.TypeFor[uint8]()))
-	assert.NoError(t, numericValueError("-1.5e-2", reflect.TypeFor[float32]()))
+	assert.NoError(t, numericValueError(" -.5e+2 ", reflect.TypeFor[float32]()))
 	assert.NoError(t, numericValueError("not numeric", reflect.TypeFor[string]()))
 	assert.ErrorIs(t, numericValueError("255.9", reflect.TypeFor[uint8]()), strconv.ErrSyntax)
 	assert.ErrorIs(t, numericValueError("256", reflect.TypeFor[uint8]()), strconv.ErrRange)
