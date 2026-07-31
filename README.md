@@ -187,8 +187,9 @@ Then make each applicable migration below:
   `gocsv.FailIfUnmatchedStructTags` does not affect it.
 
   **Cyclic types are rejected on both paths, before gocsv sees them.** A
-  self-referential type makes gocsv recurse until the process dies of a stack
-  overflow, which no `recover` can catch, so `loaders/csv.Load` and
+  self-referential type makes gocsv recurse until the process dies — a stack
+  overflow for some shapes, memory exhaustion for others, since gocsv allocates
+  per level — and no `recover` catches either. So `loaders/csv.Load` and
   `converters/csv.New` both reject one. The converter fails at construction
   rather than at conversion, and would otherwise die even on an empty input
   slice, because the recursion is driven by the type, not the values.

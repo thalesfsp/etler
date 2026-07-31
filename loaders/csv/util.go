@@ -31,7 +31,8 @@ var validateCSVOutputType = csvshape.ValidateOutput
 //
 // Load converts CSV data to a slice. It rejects nil readers and non-slice output
 // types. Two row shapes are rejected up front: cycles, which make gocsv recurse
-// until the process dies of an unrecoverable stack overflow, and lossy csv[]
+// until the process dies -- of a stack overflow or of memory exhaustion,
+// depending on the shape, and neither recoverable -- and lossy csv[]
 // expansion forms. Direct slice or array fields with a positive csv[] count are
 // supported; pointer-wrapped fields and invalid counts are rejected because
 // gocsv silently discards their columns. Other type incompatibilities are

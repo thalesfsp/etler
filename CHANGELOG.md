@@ -68,7 +68,8 @@ brings statement coverage to 99.4%.
   in force and the affected fields come back zero-valued with no error.
 
   Cyclic types are rejected on both the read and the write path, because they
-  make gocsv recurse until the process dies of an unrecoverable stack overflow.
+  make gocsv recurse until the process dies. Depending on the shape that is a
+  stack overflow or memory exhaustion, and neither is recoverable.
   The walk is a deliberate *superset* of gocsv's own traversal — it may reject a
   type gocsv could technically load, but it can never miss one that kills the
   process. A field whose type implements `MarshalCSV`, `MarshalText`,
@@ -176,7 +177,8 @@ removed, as listed under breaking changes.
 - **The CSV converter killed the process on a cyclic input type.** The read path
   was hardened against those shapes; the write path was not. `MarshalString` was
   called with no guard, and marshalling walks the same recursion, so a
-  self-referential type ended the process with an unrecoverable stack overflow —
+  self-referential type ended the process — by stack overflow or by exhausting
+  memory, neither recoverable —
   even for an empty input slice, since the recursion follows the type rather than
   the values. `converters/csv.New` now rejects the type at construction, and a
   panic during marshalling becomes an error. The walk is shared with the loader
