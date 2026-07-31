@@ -24,6 +24,11 @@ var validateCSVOutputType = csvshape.ValidateOutput
 // Loader.
 //////
 
+// A CSV with a header and no data rows loads successfully as an empty, non-nil
+// slice, so it feeds a pipeline directly; every error path returns the zero
+// value instead. The distinction matters because task.New rejects a nil
+// ProcessingData.
+//
 // Load converts CSV data to a slice. It rejects nil readers and non-slice output
 // types. Two row shapes are rejected up front: cycles, which make gocsv recurse
 // until the process dies of an unrecoverable stack overflow, and lossy csv[]

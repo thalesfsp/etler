@@ -197,13 +197,14 @@ Then make each applicable migration below:
   fails inside gocsv. The first two discard columns with no error. The message
   says which applies.
 
-  **Configure gocsv's package-level settings before loading a type for the first
+  **Configure gocsv's package-level settings before a type is used for the first
   time.** gocsv caches each row type's field mapping keyed only by the type, with
-  no way to invalidate it, so the first load anywhere in the process freezes that
-  mapping. Changing `gocsv.TagName` or the header normalizer afterwards does not
-  re-resolve it: the old mapping stays in force, the new headers match nothing,
-  and the affected fields come back zero-valued with **no error**. Treat those
-  settings as process-wide startup configuration.
+  no way to invalidate it, and the cache is shared by reading and writing — so
+  the first load *or* conversion anywhere in the process freezes that mapping.
+  Changing `gocsv.TagName` or the header normalizer afterwards does not re-resolve
+  it: the old mapping stays in force, the new headers match nothing, and the
+  affected fields come back zero-valued with **no error**. Treat those settings as
+  process-wide startup configuration.
 
   Cycle rejection walks a deliberate *superset* of gocsv's own traversal: it may
   reject a type gocsv could technically load, but it can never miss one that

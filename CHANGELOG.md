@@ -61,11 +61,11 @@ brings statement coverage to 99.3%.
   error. The message distinguishes them.
 
   gocsv's package-level tag and header settings must be configured before a row
-  type is loaded for the first time. gocsv caches each type's field mapping keyed
-  only by the type and cannot invalidate it, so the first load freezes that
-  mapping process-wide; changing `TagName` or the header normalizer afterwards
-  leaves the old mapping in force and the affected fields come back zero-valued
-  with no error.
+  type is used for the first time. gocsv caches each type's field mapping keyed
+  only by the type, cannot invalidate it, and shares the cache between reading
+  and writing, so the first load or conversion freezes that mapping process-wide;
+  changing `TagName` or the header normalizer afterwards leaves the old mapping
+  in force and the affected fields come back zero-valued with no error.
 
   Cyclic types are rejected on both the read and the write path, because they
   make gocsv recurse until the process dies of an unrecoverable stack overflow.
@@ -192,6 +192,24 @@ removed, as listed under breaking changes.
   overflowed — a fatal error, not a recoverable panic. Traversal now records
   visited pointers and stops on a repeat. Embedded interfaces are still
   traversed.
+- **`ExtractID` also hung on a self-referential interface field.** An `any` field
+  holding a pointer to itself alternated interface → pointer → interface with no
+  cycle check of its own. Being a spin rather than a stack overflow, nothing ever
+  returned and no `recover` could help, and it was reachable from both storage
+  entities' id resolution. Such a field now resolves to no id, matching the
+  pure-pointer cycle.
+- **A header-only CSV loaded as a nil slice.** A file with a header and no data
+  rows is valid input and an empty result, but `Load` returned nil, and
+  `task.New` rejects a nil `ProcessingData`, so loading zero rows failed a
+  pipeline with a validation error naming an internal field. `Load` now returns
+  an empty non-nil slice for both `[]T` and `[]*T`; error paths still return the
+  zero value.
+- **Nil processors and stages were accepted, then panicked.** `stage.New` and
+  `pipeline.New` checked only that their slice was non-empty, so a nil — or a
+  typed-nil, which is non-nil as an interface value — element passed construction
+  and became a nil pointer dereference inside `Run`. Both now reject such
+  elements and name the offending position, and a rejected construction no longer
+  leaves a published metric behind.
 - **`OnFinished` and `Async` were unsynchronised.** Their getters and setters
   read and wrote the field with no synchronisation (a data race), and `Run` read
   the callback twice, so a `SetOnFinished(nil)` landing between the nil check
