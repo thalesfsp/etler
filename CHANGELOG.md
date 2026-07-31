@@ -218,8 +218,17 @@ removed, as listed under breaking changes.
   `pipeline.New` checked only that their slice was non-empty, so a nil — or a
   typed-nil, which is non-nil as an interface value — element passed construction
   and became a nil pointer dereference inside `Run`. Both now reject such
-  elements and name the offending position, and a rejected construction no longer
-  leaves a published metric behind.
+  elements and name the offending position.
+- **A rejected construction published metrics anyway.** `expvar` entries cannot
+  be removed, so every rejected construction permanently leaked a registry entry
+  under that entity name, and a later valid entity with the same name inherited
+  the leaked objects — a retry loop over a bad config grew the registry without
+  bound. All five entities now validate before minting metrics, across twelve
+  rejection paths: an empty required collection, a nil or typed-nil element, a
+  nil converter, a nil function, and a nil option. One case is not preflightable:
+  an option that itself returns a nil or structurally invalid entity can only be
+  detected by executing it, which requires the entity — and its metrics — to
+  already exist.
 - **`OnFinished` and `Async` were unsynchronised.** Their getters and setters
   read and wrote the field with no synchronisation (a data race), and `Run` read
   the callback twice, so a `SetOnFinished(nil)` landing between the nil check
