@@ -25,6 +25,10 @@ type cycleFirstLossyExpansion struct {
 	Values []int `csv:"values" csv[]:"0"`
 }
 
+type overlongArrayExpansion struct {
+	Values [1]int `csv:"values" csv[]:"2"`
+}
+
 func TestValidateCycleAndOutput_doNotShareCachedVerdicts(t *testing.T) {
 	t.Run("output rejection does not leak to cycle validation", func(t *testing.T) {
 		require.ErrorContains(t, ValidateOutput(reflect.TypeFor[outputFirstLossyExpansion]()), "unsupported csv[] slice expansion")
@@ -44,6 +48,10 @@ func TestValidateCycle_rejectsCycles(t *testing.T) {
 	require.ErrorContains(t, ValidateCycle(reflect.TypeFor[sliceCycle]()), "invalid cyclic CSV output type csvshape.sliceCycle")
 }
 
+func TestValidateCycle_acceptsOverlongArrayExpansion(t *testing.T) {
+	require.NoError(t, ValidateCycle(reflect.TypeFor[overlongArrayExpansion]()))
+}
+
 func TestValidateOutput_handlesExpansionAndTagNameForms(t *testing.T) {
 	t.Run("direct positive slice expansion", func(t *testing.T) {
 		type row struct {
@@ -59,6 +67,14 @@ func TestValidateOutput_handlesExpansionAndTagNameForms(t *testing.T) {
 		}
 
 		require.ErrorContains(t, ValidateOutput(reflect.TypeFor[row]()), "positive integer count")
+	})
+
+	t.Run("array count exceeds length", func(t *testing.T) {
+		require.EqualError(
+			t,
+			ValidateOutput(reflect.TypeFor[overlongArrayExpansion]()),
+			"invalid CSV output type csvshape.overlongArrayExpansion uses unsupported csv[] slice expansion on field Values: count 2 exceeds array length 1; use a count no greater than the array length",
+		)
 	})
 
 	t.Run("tag name has its own cache entry", func(t *testing.T) {

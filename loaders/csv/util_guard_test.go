@@ -279,6 +279,17 @@ func TestLoad_acceptsDirectCSVSliceExpansionForms(t *testing.T) {
 		require.Equal(t, []row{{Items: []int{7, 8}}}, out)
 	})
 
+	t.Run("slice count larger than columns", func(t *testing.T) {
+		type row struct {
+			Items []int `csv:"items" csv[]:"5"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("items[0],items[1]\n7,8\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []row{{Items: []int{7, 8}}}, out)
+	})
+
 	t.Run("array of primitives", func(t *testing.T) {
 		type row struct {
 			Items [2]int `csv:"items" csv[]:"2"`
@@ -288,6 +299,17 @@ func TestLoad_acceptsDirectCSVSliceExpansionForms(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, []row{{Items: [2]int{7, 8}}}, out)
+	})
+
+	t.Run("array count smaller than length", func(t *testing.T) {
+		type row struct {
+			Items [3]int `csv:"items" csv[]:"2"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("items[0],items[1]\n7,8\n"))
+
+		require.NoError(t, err)
+		require.Equal(t, []row{{Items: [3]int{7, 8}}}, out)
 	})
 
 	t.Run("array of structs", func(t *testing.T) {

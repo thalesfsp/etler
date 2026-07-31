@@ -112,6 +112,15 @@ func validate(
 						expansionCount,
 					))
 				}
+				if field.Type.Kind() == reflect.Array && count > field.Type.Len() {
+					return customerror.NewInvalidError(fmt.Sprintf(
+						"CSV output type %s uses unsupported csv[] slice expansion on field %s: count %d exceeds array length %d; use a count no greater than the array length",
+						rowType,
+						field.Name,
+						count,
+						field.Type.Len(),
+					))
+				}
 			}
 		}
 

@@ -61,7 +61,12 @@ var validateCSVOutputType = csvshape.ValidateOutput
 // Load strips one leading UTF-8 BOM and constructs encoding/csv.NewReader
 // directly. Other decoding behavior comes from gocsv's Unmarshaller. Its
 // package-level tag, header, and duplicate settings influence Load; its reader
-// factory and FailIfUnmatchedStructTags do not.
+// factory and FailIfUnmatchedStructTags do not. Gocsv caches each row type's
+// field mapping on first use, so tag and header settings must be configured
+// before that type is first loaded anywhere in the process. Changing them
+// afterward does not invalidate the cache or return an error: the previous
+// mapping remains in use, and fields expected by the new settings are silently
+// left at their zero values.
 func Load[Out any](in io.Reader) (Out, error) {
 	outType := reflect.TypeOf((*Out)(nil)).Elem()
 	if outType.Kind() != reflect.Slice {
