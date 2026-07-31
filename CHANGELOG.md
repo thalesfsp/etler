@@ -55,11 +55,13 @@ brings statement coverage to 99.4%.
   `"a\tb"`. gocsv's `csv[]` slice expansion is supported where gocsv handles it:
   a direct `[]T` field with a positive count, or a `[N]T` field whose count is at
   most `N`, decodes normally. Four forms are rejected — the tag on an anonymous
-  field, which gocsv drops whole so the tag never takes effect; the tag on a
-  pointer-wrapped field, which gocsv ignores outright; a count that is
-  non-numeric or non-positive, which expands to nothing; and a count larger than
-  its array, which fails inside gocsv. The first two discard columns with no
-  error. The message distinguishes them.
+  slice or array field, which gocsv drops whole so the tag never takes effect;
+  the tag on a pointer-wrapped field, which gocsv ignores outright; a count that
+  is non-numeric or non-positive; and a count larger than its array, which fails
+  inside gocsv. The first three lose data with no error — an invalid count
+  collapses a primitive slice into one JSON column when writing and leaves it
+  empty when loading. The message distinguishes them. A tag on an anonymous
+  *struct* is inert rather than lossy and is accepted.
 
   gocsv's package-level tag and header settings must be configured before a row
   type is used for the first time. gocsv caches each type's field mapping keyed

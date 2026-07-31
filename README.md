@@ -198,11 +198,13 @@ Then make each applicable migration below:
   **`csv[]` expansion is supported where gocsv handles it, on both paths.** A
   direct `[]T` field with a positive count, or a `[N]T` field whose count is at
   most `N`, decodes normally. Four forms are rejected: the tag on an anonymous
-  field, which gocsv drops whole so the tag cannot take effect; the tag on a
-  pointer-wrapped field, which gocsv ignores entirely; a count that is
-  non-numeric or non-positive, which expands to nothing; and a count larger than
-  the array it applies to, which fails inside gocsv. The first two discard
-  columns with no error. The message says which applies.
+  slice or array field, which gocsv drops whole so the tag cannot take effect;
+  the tag on a pointer-wrapped field, which gocsv ignores entirely; a count that
+  is non-numeric or non-positive; and a count larger than the array it applies
+  to, which fails inside gocsv. The first three lose data with no error — an
+  invalid count collapses a primitive slice into one JSON column when writing and
+  leaves it empty when loading. The message says which applies. A tag on an
+  anonymous *struct* is inert rather than lossy, so it is accepted.
 
   **Configure gocsv's package-level settings before a type is used for the first
   time.** gocsv caches each row type's field mapping keyed only by the type, with
