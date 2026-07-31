@@ -35,13 +35,22 @@ coverage raised to ~99%.
   symmetric, and plain `int`, `float64` and `bool` struct fields now work.
   Structs are mapped by `csv:"..."` tag instead of `json:"..."` (untagged
   fields still match their header case-insensitively), and the
-  `json:"age,string"` workaround is no longer needed. Numeric fields require
-  strict decimal syntax: `010` is ten, not eight; `1_0` and `127.9` into an
-  integer are errors rather than silently becoming 10 and 127; and a value that
-  does not fit its destination is rejected instead of wrapping. A header that
-  matches two fields ambiguously is an error rather than resolved by
-  declaration order. The loader also no longer strips tab characters, which
-  previously corrupted legitimately quoted content such as `"a\tb"`.
+  `json:"age,string"` workaround is no longer needed — plain `int`, `float64`
+  and `bool` fields decode directly. The loader also no longer strips tab
+  characters, which previously corrupted legitimately quoted content such as
+  `"a\tb"`. Output types using gocsv's `csv[]` slice expansion are rejected.
+
+  **Numeric conversion is gocsv's and is permissive, not range-safe:** `010`
+  decodes as `8`, `1_0` as `10`, `127.9` into an integer as `127`, and
+  out-of-range values may wrap or become infinite. This is a deliberate,
+  documented limitation. Validating it requires gocsv's header-to-field
+  mapping, which it builds but keeps unexported with no accessor; three
+  mechanisms that tried to reconstruct it each failed and silently missed
+  fields, so the guarantee was withdrawn rather than faked. Callers needing a
+  syntax or range guarantee should decode into a `string` field and parse it
+  themselves. Note that v3's JSON-based path rejected some of these inputs, so
+  this is a narrowing in that one respect — traded for correct typed decoding
+  of ordinary values, which v3 could not do at all without a `,string` tag.
 - **Storage writes now use a stable id** derived from the item, instead of a
   fresh UUID per attempt, so retrying after a timeout reuses the same key rather
   than inserting under a new one. Whether that overwrites or is rejected is the

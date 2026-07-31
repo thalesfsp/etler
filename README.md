@@ -127,12 +127,14 @@ requires Go 1.25. Beyond that:
   `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
   signatures are unchanged.
 - The CSV loader now maps struct fields by `csv:"..."` tag instead of
-  `json:"..."`, matching the CSV converter. Untagged top-level fields still
-  match their header case-insensitively, as before; nested struct fields are
-  matched by their synthesized dotted key (`Meta.Name`), case-sensitively. Plain `int`, `float64` and `bool`
-  fields now decode correctly — remove the old `json:"age,string"` workaround —
-  and a value that does not fit its field is now an error rather than a silent
-  wraparound.
+  `json:"..."`, matching the CSV converter. Untagged fields still match their
+  header case-insensitively. Plain `int`, `float64` and `bool` fields decode
+  directly — remove the old `json:"age,string"` workaround.
+  **Numeric conversion is gocsv's and is permissive, not range-safe:** `010`
+  decodes as `8`, `1_0` as `10`, `127.9` into an integer as `127`, and
+  out-of-range values may wrap or become infinite. If you need a syntax or
+  range guarantee, decode into a `string` field and parse it yourself. Output
+  types using gocsv's `csv[]` slice expansion are not supported.
 - The storage constructors take their own option type. Entity options that used
   to be passed directly must now be wrapped:
   `storage.New[Item](s, "target", storage.WithConverterOptions(opt))` — and
