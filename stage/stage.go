@@ -237,8 +237,6 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Store as reference to be used as the input of the next processor.
 	retroFeedIn := originalTask.ProcessingData
 
-	hasProcessorOutput := false
-
 	// Async processors are tracked and joined before the stage completes:
 	// the stage is not Done while they still run, and their failures fail
 	// the stage.
@@ -308,7 +306,9 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 			// Update the input with the output.
 			retroFeedIn = rFI
-			hasProcessorOutput = true
+			if retroFeedIn == nil {
+				retroFeedIn = make([]ProcessingData, 0)
+			}
 		}
 
 		//////
@@ -331,10 +331,6 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// NOTE: WithRemoveZeroValues(false) is required. The default would
 	// silently drop converted items that happen to be the zero value of
 	// `ConvertedData` — data loss.
-	if hasProcessorOutput && retroFeedIn == nil {
-		retroFeedIn = make([]ProcessingData, 0)
-	}
-
 	convertedData, errs := concurrentloop.Map(
 		tracedContext,
 		retroFeedIn,
