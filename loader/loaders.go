@@ -3,7 +3,6 @@ package loader
 import (
 	"context"
 	"expvar"
-	"reflect"
 	"sync"
 	"time"
 
@@ -232,9 +231,9 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 
 // New creates a loader. It applies options in order, retains each returned
 // implementation, and then validates the result. Nil options, results, and
-// embedded implementations are rejected. Structural validation runs before
-// lifecycle metric getters; the final implementation must expose non-nil
-// lifecycle metrics.
+// embedded implementations at any anonymous-field depth are rejected.
+// Structural validation runs before lifecycle metric getters; the final
+// implementation must expose non-nil lifecycle metrics.
 func New[In, Out any](
 	name, description string,
 	fn Load[In, Out],
@@ -272,7 +271,7 @@ func New[In, Out any](
 		}
 
 		c = opt(c)
-		if isNilOptionResult(c) {
+		if shared.HasNilEmbeddedImplementation(c) {
 			return nil, customerror.NewRequiredError("loader option result")
 		}
 	}
@@ -297,53 +296,6 @@ func New[In, Out any](
 	c.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
 
 	return c, nil
-}
-
-// isNilOptionResult detects nil option results and nil embedded loader
-// implementations without depending on validation tags.
-func isNilOptionResult[In, Out any](c ILoader[In, Out]) bool {
-	if c == nil {
-		return true
-	}
-
-	isNil := func(value reflect.Value) bool {
-		switch value.Kind() {
-		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-			return value.IsNil()
-		default:
-			return false
-		}
-	}
-
-	value := reflect.ValueOf(c)
-	if isNil(value) {
-		return true
-	}
-
-	value = reflect.Indirect(value)
-	if value.Kind() != reflect.Struct {
-		return false
-	}
-
-	implementationType := reflect.TypeFor[ILoader[In, Out]]()
-
-	for index := range value.NumField() {
-		fieldType := value.Type().Field(index)
-		if !fieldType.Anonymous || !fieldType.Type.Implements(implementationType) {
-			continue
-		}
-
-		field := value.Field(index)
-		if isNil(field) {
-			return true
-		}
-
-		if field.Kind() == reflect.Interface && isNil(field.Elem()) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // validateOptionMetrics ensures options retain the metrics dereferenced by

@@ -3,7 +3,6 @@ package processor
 import (
 	"context"
 	"expvar"
-	"reflect"
 	"sync"
 	"time"
 
@@ -325,10 +324,10 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 
 // New creates a processor. It applies options in order, retains each returned
 // implementation, and then validates the result. Nil options, results, and
-// embedded implementations are rejected. Structural validation runs before
-// lifecycle metric getters; the final implementation must expose non-nil
-// lifecycle metrics. The transform must not mutate its input slice or
-// pointed-to values.
+// embedded implementations at any anonymous-field depth are rejected.
+// Structural validation runs before lifecycle metric getters; the final
+// implementation must expose non-nil lifecycle metrics. The transform must not
+// mutate its input slice or pointed-to values.
 func New[ProcessingData any](
 	name, description string,
 	fn Transform[ProcessingData],
@@ -367,7 +366,7 @@ func New[ProcessingData any](
 		}
 
 		p = opt(p)
-		if isNilOptionResult(p) {
+		if shared.HasNilEmbeddedImplementation(p) {
 			return nil, customerror.NewRequiredError("processor option result")
 		}
 	}
@@ -392,53 +391,6 @@ func New[ProcessingData any](
 	p.GetLogger().PrintlnWithOptions(level.Trace, status.Created.String())
 
 	return p, nil
-}
-
-// isNilOptionResult detects nil option results and nil embedded processor
-// implementations without depending on validation tags.
-func isNilOptionResult[ProcessingData any](p IProcessor[ProcessingData]) bool {
-	if p == nil {
-		return true
-	}
-
-	isNil := func(value reflect.Value) bool {
-		switch value.Kind() {
-		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-			return value.IsNil()
-		default:
-			return false
-		}
-	}
-
-	value := reflect.ValueOf(p)
-	if isNil(value) {
-		return true
-	}
-
-	value = reflect.Indirect(value)
-	if value.Kind() != reflect.Struct {
-		return false
-	}
-
-	implementationType := reflect.TypeFor[IProcessor[ProcessingData]]()
-
-	for index := range value.NumField() {
-		fieldType := value.Type().Field(index)
-		if !fieldType.Anonymous || !fieldType.Type.Implements(implementationType) {
-			continue
-		}
-
-		field := value.Field(index)
-		if isNil(field) {
-			return true
-		}
-
-		if field.Kind() == reflect.Interface && isNil(field.Elem()) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // validateOptionMetrics ensures options retain the metrics dereferenced by
