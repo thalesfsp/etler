@@ -15,7 +15,7 @@ Major release. Module path is now `github.com/thalesfsp/etler/v4`.
 
 The release hardens lifecycle concurrency, fixes tracing and storage failure
 paths, replaces the CSV loader's JSON round trip with direct gocsv decoding, and
-brings statement coverage to 99.3%.
+brings statement coverage to 99.4%.
 
 ### Breaking changes
 
@@ -80,8 +80,14 @@ brings statement coverage to 99.3%.
   normalizer before deciding to skip, and that normalizer cannot be read back, so
   honouring the tag could let a cyclic type through into a crash.
 
-  Loading and writing are not symmetric. The converter writes with
-  `gocsv.MarshalString`, uses gocsv's writer factory, and supports `csv[]`.
+  Both paths run the same validation, so a type the converter writes is a type
+  the loader reads: valid `csv[]` expansion works on both, and the three lossy
+  forms are rejected on both. They were briefly allowed to diverge, and the
+  converter then emitted a phantom trailing column for an over-count array and
+  JSON-dumped a pointer-wrapped one into a single column, with no error.
+
+  Loading and writing still differ in the mechanics. The converter writes with
+  `gocsv.MarshalString` and uses gocsv's writer factory.
   Loading strips one leading UTF-8 BOM, forces `encoding/csv.NewReader`, and
   therefore ignores gocsv's reader factory. Its gocsv unmarshaller still uses
   the package-level tag name, tag separator, field combiner, header normalizer,
@@ -265,7 +271,7 @@ mutate their input slice or the values it points to.
   zero-value data-loss bug, async failure, pause/resume, and context
   cancellation.
 - README installation, quick start, concurrency contract, and a v3 upgrade guide.
-- Current statement coverage is 99.3%; `processor`, `processors/storage`,
+- Current statement coverage is 99.4%; `processor`, `processors/storage`,
   `converters/storage`, `converters/csv`, `converters/passthru`, `loaders/csv`,
   `task`, `internal/logging`, `internal/metrics`, `internal/shared`, and
   `internal/csvshape` report 100%.

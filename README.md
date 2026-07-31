@@ -174,11 +174,11 @@ Then make each applicable migration below:
   matters. Tabs in quoted values are now preserved; callers that relied on v3
   sanitizing them must strip them explicitly.
 
-  Loading and writing are not symmetric. Writing calls `gocsv.MarshalString`
-  through gocsv's writer factory and supports gocsv's `csv[]` expansion.
-  Loading strips one leading UTF-8 BOM, constructs `encoding/csv.NewReader`
-  directly; a host-configured gocsv reader factory therefore does not affect
-  this loader. The loader does use gocsv's tag name, tag separator, field
+  Loading and writing run the same validation, so a type the converter writes is
+  a type the loader reads. They differ in mechanics: writing calls
+  `gocsv.MarshalString` through gocsv's writer factory, while loading strips one
+  leading UTF-8 BOM and constructs `encoding/csv.NewReader` directly, so a
+  host-configured gocsv reader factory does not affect the loader. The loader does use gocsv's tag name, tag separator, field
   combiner, header normalizer, and duplicate-header settings;
   `gocsv.FailIfUnmatchedStructTags` does not affect it.
 
@@ -189,7 +189,7 @@ Then make each applicable migration below:
   rather than at conversion, and would otherwise die even on an empty input
   slice, because the recursion is driven by the type, not the values.
 
-  **`csv[]` expansion is supported where gocsv handles it.** A direct `[]T` field
+  **`csv[]` expansion is supported where gocsv handles it, on both paths.** A direct `[]T` field
   with a positive count, or a `[N]T` field whose count is at most `N`, decodes
   normally. Three forms are rejected: the tag on a pointer-wrapped field, which
   gocsv ignores entirely; a count that is non-numeric or non-positive, which
