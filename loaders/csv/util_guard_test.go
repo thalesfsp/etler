@@ -18,6 +18,129 @@ func (value *GuardCustomInt) UnmarshalCSV(string) error {
 	return nil
 }
 
+func TestLoad_rejectsInterfaceElement(t *testing.T) {
+	var (
+		out []any
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]any](strings.NewReader("Value\nx\n"))
+	})
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported element type")
+	assert.ErrorContains(t, err, "interface {}")
+}
+
+func TestLoad_rejectsInterfaceField(t *testing.T) {
+	type Row struct {
+		Value any
+	}
+
+	var (
+		out []Row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]Row](strings.NewReader("Value\nx\n"))
+	})
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported interface field")
+	assert.ErrorContains(t, err, "Value")
+}
+
+func TestLoad_rejectsPointerToInterfaceField(t *testing.T) {
+	type Row struct {
+		Value *any
+	}
+
+	var (
+		out []Row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]Row](strings.NewReader("Value\nx\n"))
+	})
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported interface field")
+	assert.ErrorContains(t, err, "Value")
+}
+
+func TestLoad_rejectsNestedInterfaceField(t *testing.T) {
+	type Nested struct {
+		Value any
+	}
+	type Row struct {
+		Nested Nested
+	}
+
+	var (
+		out []Row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]Row](strings.NewReader("Nested.Value\nx\n"))
+	})
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported interface field")
+	assert.ErrorContains(t, err, "Value")
+}
+
+func TestLoad_ignoresInterfaceFields(t *testing.T) {
+	type Row struct {
+		Name           string
+		Ignored        any  `csv:"-"`
+		IgnoredPointer *any `csv:"-"`
+	}
+
+	out, err := Load[[]Row](strings.NewReader("Name\nalice\n"))
+	require.NoError(t, err)
+	require.Equal(t, []Row{{Name: "alice"}}, out)
+}
+
+func TestLoad_acceptsSupportedOutputShapes(t *testing.T) {
+	type Row struct {
+		Name string
+	}
+
+	t.Run("struct element", func(t *testing.T) {
+		out, err := Load[[]Row](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []Row{{Name: "alice"}}, out)
+	})
+
+	t.Run("pointer-to-struct element", func(t *testing.T) {
+		out, err := Load[[]*Row](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []*Row{{Name: "alice"}}, out)
+	})
+
+	t.Run("anonymous struct element", func(t *testing.T) {
+		out, err := Load[[]struct{ Name string }](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []struct{ Name string }{{Name: "alice"}}, out)
+	})
+
+	t.Run("time.Time field", func(t *testing.T) {
+		type TimeRow struct {
+			When time.Time
+		}
+
+		out, err := Load[[]TimeRow](strings.NewReader("When\n2026-07-30T00:00:00Z\n"))
+		require.NoError(t, err)
+		require.Equal(t, []TimeRow{{
+			When: time.Date(2026, time.July, 30, 0, 0, 0, 0, time.UTC),
+		}}, out)
+	})
+}
+
 func TestLoad_rejectsAnonymousNamedString(t *testing.T) {
 	type Name string
 	type Row struct {

@@ -33,7 +33,10 @@ var (
 // matches a header with surrounding whitespace or U+200B, U+200C, U+200D, and
 // U+FEFF zero-width characters removed. A process-wide gocsv header normalizer
 // can change that rule; use explicit csv tags when accepted spelling must be
-// unambiguous. Output types using csv[] slice expansion are unsupported.
+// unambiguous. Load rejects nil readers and output types that are not slices,
+// whose elements are not structs or pointers to structs, that are cyclic, that
+// use csv[] slice expansion, or that contain anonymous non-struct fields or
+// interface fields (including pointers to interfaces) not tagged csv:"-".
 //
 // Numeric conversion uses gocsv's permissive, not range-safe semantics: 010
 // decodes as 8, 1_0 as 10, and 127.9 into an integer as 127. Out-of-range
@@ -53,6 +56,13 @@ func Load[Out any](in io.Reader) (Out, error) {
 	rowType := outType.Elem()
 	if rowType.Kind() == reflect.Pointer {
 		rowType = rowType.Elem()
+	}
+	if rowType.Kind() != reflect.Struct {
+		return *new(Out), customerror.NewInvalidError(fmt.Sprintf(
+			"CSV output type %s uses unsupported element type %s, which must be a struct or pointer to a struct",
+			outType,
+			outType.Elem(),
+		))
 	}
 	if err := validateCSVOutputType(rowType, nil); err != nil {
 		return *new(Out), err
@@ -140,6 +150,14 @@ func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{
 		if field.Anonymous && fieldType.Kind() != reflect.Struct {
 			return customerror.NewInvalidError(fmt.Sprintf(
 				"CSV output type %s uses unsupported anonymous field %s with non-struct type %s",
+				rowType,
+				field.Name,
+				field.Type,
+			))
+		}
+		if fieldType.Kind() == reflect.Interface {
+			return customerror.NewInvalidError(fmt.Sprintf(
+				"CSV output type %s uses unsupported interface field %s with type %s",
 				rowType,
 				field.Name,
 				field.Type,
