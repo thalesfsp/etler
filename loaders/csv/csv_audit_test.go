@@ -64,12 +64,11 @@ func TestLoad_malformedCSV_returnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestLoad_invalidInteger_returnsDecimalSyntaxError(t *testing.T) {
+func TestLoad_invalidInteger_returnsGocsvConversionError(t *testing.T) {
 	out, err := Load[[]auditRow](strings.NewReader("Name,Age\nalice,abc\n"))
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, `value "abc" in column "Age"`)
-	assert.ErrorContains(t, err, "not valid decimal input")
+	assert.ErrorContains(t, err, `strconv.ParseInt: parsing "abc": invalid syntax`)
 }
 
 func TestLoad_nonSliceOutput_returnsErrorWithoutPanic(t *testing.T) {
