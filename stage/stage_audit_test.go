@@ -312,6 +312,88 @@ func TestStage_converterError_propagatesCause(t *testing.T) {
 
 	assert.Equal(t, status.Failed.String(), stg.GetStatus().Value())
 	assert.Equal(t, int64(1), stg.GetCounterFailed().Value())
+	assert.Equal(t, int64(1), stg.GetProgress().Value(),
+		"a successful processor must count as complete even when conversion fails")
+	assert.Equal(t, "100%", stg.GetProgressPercent().Value(),
+		"processor progress must remain complete even when conversion fails")
+}
+
+// Regression: a processor that filters out every item may idiomatically return
+// either a nil slice or an empty non-nil slice. Both results must succeed and
+// be exposed as empty non-nil task data.
+func TestStage_filterOutput_nilAndEmptyAreEquivalent(t *testing.T) {
+	tests := []struct {
+		name string
+		out  []int
+	}{
+		{
+			name: "nil",
+			out:  nil,
+		},
+		{
+			name: "empty",
+			out:  []int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter, err := processor.New(
+				"filter-everything-"+tt.name+"-audit",
+				"filters out every item",
+				func(ctx context.Context, processingData []int) ([]int, error) {
+					return tt.out, nil
+				},
+			)
+			require.NoError(t, err)
+
+			stg, err := New(
+				"stage-filter-everything-"+tt.name+"-audit",
+				"nil and empty filter output are equivalent",
+				identityConverter(),
+				filter,
+			)
+			require.NoError(t, err)
+
+			out, err := stg.Run(context.Background(), task.MustNew[int, int]([]int{1, 2, 3}))
+			require.NoError(t, err)
+
+			assert.NotNil(t, out.ProcessingData)
+			assert.Empty(t, out.ProcessingData)
+			assert.NotNil(t, out.ConvertedData)
+			assert.Empty(t, out.ConvertedData)
+			assert.Equal(t, status.Done.String(), stg.GetStatus().Value())
+			assert.Equal(t, int64(1), stg.GetCounterDone().Value())
+			assert.Equal(t, int64(0), stg.GetCounterFailed().Value())
+		})
+	}
+}
+
+// Negative control: genuinely nil input that is not replaced by synchronous
+// processor output must still surface concurrentloop's validation error.
+func TestStage_nilInputWithoutSyncOutput_stillFailsConversion(t *testing.T) {
+	async, err := processor.New(
+		"async-nil-input-audit",
+		"does not forward its output",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+		processor.WithAsync[int](true),
+	)
+	require.NoError(t, err)
+
+	stg, err := New(
+		"stage-nil-input-audit",
+		"genuine nil input remains invalid",
+		identityConverter(),
+		async,
+	)
+	require.NoError(t, err)
+
+	_, err = stg.Run(context.Background(), task.Task[int, int]{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "items cannot be nil")
+	assert.Equal(t, status.Failed.String(), stg.GetStatus().Value())
 }
 
 // Bug: zero values must survive the conversion step at the stage level. The
@@ -386,6 +468,46 @@ func TestStage_failedRun_replacesPreviousDuration(t *testing.T) {
 
 	assert.Less(t, stg.GetDuration().Value(), successfulDuration,
 		"the failed stage run must replace the previous successful duration")
+}
+
+// Regression: completion callbacks are outside the stage's own work and must
+// not be included in its duration metric.
+func TestStage_duration_excludesOnFinished(t *testing.T) {
+	const (
+		callbackDelay = 250 * time.Millisecond
+		durationLimit = 150 * time.Millisecond
+	)
+
+	identity, err := processor.New(
+		"identity-duration-callback-audit",
+		"identity",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	stg, err := New(
+		"stage-duration-callback-audit",
+		"duration excludes completion callback",
+		identityConverter(),
+		identity,
+	)
+	require.NoError(t, err)
+
+	stg.SetOnFinished(func(ctx context.Context, s IStage[int, int], original task.Task[int, int], final task.Task[int, int]) {
+		time.Sleep(callbackDelay)
+	})
+
+	started := time.Now()
+
+	_, err = stg.Run(context.Background(), task.MustNew[int, int]([]int{1}))
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, time.Since(started), callbackDelay,
+		"the callback must run before the stage returns")
+	assert.Less(t, stg.GetDuration().Value(), durationLimit.Milliseconds(),
+		"stage duration must exclude the completion callback")
 }
 
 // Edge case: a stage without processors must not be created (validation).

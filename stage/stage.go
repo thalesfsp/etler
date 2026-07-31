@@ -111,7 +111,9 @@ func (s *Stage[ProcessingData, ConvertedData]) GetProgress() *expvar.Int {
 	return s.Progress
 }
 
-// GetProgressPercent returns the completed-processor percentage.
+// GetProgressPercent returns the percentage of processors that completed
+// successfully. It does not indicate overall stage success and can be 100%
+// when conversion fails after every processor completes.
 func (s *Stage[ProcessingData, ConvertedData]) GetProgressPercent() *expvar.String {
 	return s.ProgressPercent
 }
@@ -163,7 +165,8 @@ func (s *Stage[ProcessingData, ConvertedData]) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
-// GetDuration returns the most recent run duration in milliseconds.
+// GetDuration returns the most recent run duration in milliseconds, excluding
+// the completion callback.
 func (s *Stage[ProcessingData, ConvertedData]) GetDuration() *expvar.Int {
 	return s.Duration
 }
@@ -234,6 +237,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Store as reference to be used as the input of the next processor.
 	retroFeedIn := originalTask.ProcessingData
 
+	hasProcessorOutput := false
+
 	// Async processors are tracked and joined before the stage completes:
 	// the stage is not Done while they still run, and their failures fail
 	// the stage.
@@ -303,6 +308,7 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 			// Update the input with the output.
 			retroFeedIn = rFI
+			hasProcessorOutput = true
 		}
 
 		//////
@@ -325,6 +331,10 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// NOTE: WithRemoveZeroValues(false) is required. The default would
 	// silently drop converted items that happen to be the zero value of
 	// `ConvertedData` — data loss.
+	if hasProcessorOutput && retroFeedIn == nil {
+		retroFeedIn = make([]ProcessingData, 0)
+	}
+
 	convertedData, errs := concurrentloop.Map(
 		tracedContext,
 		retroFeedIn,
@@ -387,14 +397,14 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	tsk.ConvertedData = convertedData
 
+	// Set duration.
+	s.GetDuration().Set(time.Since(now).Milliseconds())
+	durationSet = true
+
 	onFinished := s.GetOnFinished()
 	if onFinished != nil {
 		onFinished(ctx, s, originalTask, tsk)
 	}
-
-	// Set duration.
-	s.GetDuration().Set(time.Since(now).Milliseconds())
-	durationSet = true
 
 	// Print the stage's status.
 	if logging.Admits(s.GetLogger(), level.Debug) {
