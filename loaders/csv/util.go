@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 
 	"github.com/gocarina/gocsv"
 	"github.com/thalesfsp/customerror/v2"
@@ -19,8 +20,10 @@ import (
 //////
 
 var (
-	csvUnmarshallerType  = reflect.TypeFor[gocsv.TypeUnmarshaller]()
-	textUnmarshallerType = reflect.TypeFor[encoding.TextUnmarshaler]()
+	csvMarshallerType             = reflect.TypeFor[gocsv.TypeMarshaller]()
+	textMarshallerType            = reflect.TypeFor[encoding.TextMarshaler]()
+	csvUnmarshallerType           = reflect.TypeFor[gocsv.TypeUnmarshaller]()
+	csvWithFieldsUnmarshallerType = reflect.TypeFor[gocsv.TypeUnmarshalCSVWithFields]()
 )
 
 //////
@@ -133,26 +136,37 @@ func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{
 	defer delete(active, rowType)
 	for index := range rowType.NumField() {
 		field := rowType.Field(index)
-		if !field.IsExported() {
+		if field.PkgPath != "" {
 			continue
 		}
-		fieldType := field.Type
-		for fieldType.Kind() == reflect.Pointer {
-			fieldType = fieldType.Elem()
+		if !field.Anonymous && gocsvSkipsField(field) {
+			continue
+		}
+
+		// This deliberately follows every pointer level even though gocsv's
+		// traversal follows one: accepting an ignored csv[] tag loses columns.
+		expansionType := field.Type
+		for expansionType.Kind() == reflect.Pointer {
+			expansionType = expansionType.Elem()
 		}
 		if _, expands := field.Tag.Lookup(gocsv.TagName + "[]"); expands &&
-			(fieldType.Kind() == reflect.Slice || fieldType.Kind() == reflect.Array) {
+			(expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array) {
 			return customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
 		}
-		if fieldType.Kind() == reflect.Struct && !hasCustomUnmarshaller(fieldType) {
-			if err := validateCSVOutputType(fieldType, active); err != nil {
+
+		structType := field.Type
+		if structType.Kind() == reflect.Pointer {
+			structType = structType.Elem()
+		}
+		if structType.Kind() == reflect.Struct && !gocsvCanMarshal(structType) {
+			if err := validateCSVOutputType(structType, active); err != nil {
 				return err
 			}
 			continue
 		}
-		if (fieldType.Kind() == reflect.Slice || fieldType.Kind() == reflect.Array) &&
-			fieldType.Elem().Kind() == reflect.Struct {
-			if err := validateCSVOutputType(fieldType.Elem(), active); err != nil {
+		if (field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) &&
+			field.Type.Elem().Kind() == reflect.Struct {
+			if err := validateCSVOutputType(field.Type.Elem(), active); err != nil {
 				return err
 			}
 		}
@@ -170,10 +184,30 @@ func callGocsv[Result any](outType reflect.Type, call func() (Result, error)) (r
 	return call()
 }
 
-func hasCustomUnmarshaller(typ reflect.Type) bool {
-	if typ.Kind() == reflect.Pointer {
-		typ = typ.Elem()
+func gocsvSkipsField(field reflect.StructField) bool {
+	filteredTags := make([]string, 0, 1)
+	for _, tag := range strings.Split(field.Tag.Get(gocsv.TagName), gocsv.TagSeparator) {
+		tag = strings.TrimSpace(tag)
+		if tag == "omitempty" || strings.HasPrefix(tag, "partial") || strings.HasPrefix(tag, "default=") {
+			continue
+		}
+		filteredTags = append(filteredTags, tag)
 	}
-	return typ.Implements(csvUnmarshallerType) || typ.Implements(textUnmarshallerType) ||
-		reflect.PointerTo(typ).Implements(csvUnmarshallerType) || reflect.PointerTo(typ).Implements(textUnmarshallerType)
+
+	return len(filteredTags) == 1 && filteredTags[0] == "-"
+}
+
+func gocsvCanMarshal(typ reflect.Type) bool {
+	if typ.Implements(csvMarshallerType) ||
+		typ.Implements(textMarshallerType) ||
+		typ.Implements(csvUnmarshallerType) ||
+		typ.Implements(csvWithFieldsUnmarshallerType) {
+		return true
+	}
+
+	pointerType := reflect.PointerTo(typ)
+	return pointerType.Implements(csvMarshallerType) ||
+		pointerType.Implements(textMarshallerType) ||
+		pointerType.Implements(csvUnmarshallerType) ||
+		pointerType.Implements(csvWithFieldsUnmarshallerType)
 }
