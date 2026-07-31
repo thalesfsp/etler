@@ -34,6 +34,41 @@ type csvOutputTypeValidationCacheValue struct {
 	err error
 }
 
+type cyclicCSVOutputTraversalError struct {
+	offendingType reflect.Type
+}
+
+func (e *cyclicCSVOutputTraversalError) Error() string {
+	return errCyclicCSVOutputType.Error()
+}
+
+func (e *cyclicCSVOutputTraversalError) Unwrap() error {
+	return errCyclicCSVOutputType
+}
+
+type cyclicCSVOutputValidationError struct {
+	requestedType reflect.Type
+	offendingType reflect.Type
+	invalid       error
+}
+
+func (e *cyclicCSVOutputValidationError) message() string {
+	message := fmt.Sprintf("cyclic CSV output type %s", e.requestedType)
+	if e.requestedType != e.offendingType {
+		message += fmt.Sprintf(": cycle detected at %s", e.offendingType)
+	}
+
+	return message
+}
+
+func (e *cyclicCSVOutputValidationError) Error() string {
+	return e.invalid.Error()
+}
+
+func (e *cyclicCSVOutputValidationError) Unwrap() []error {
+	return []error{e.invalid, errCyclicCSVOutputType}
+}
+
 //////
 // Validators.
 //////
@@ -41,8 +76,9 @@ type csvOutputTypeValidationCacheValue struct {
 // ValidateOutput rejects cyclic row types and lossy csv[] expansion forms.
 func ValidateOutput(rowType reflect.Type) error {
 	err := validate(rowType, nil, gocsv.TagName)
-	if errors.Is(err, errCyclicCSVOutputType) {
-		return customerror.NewInvalidError(fmt.Sprintf("cyclic CSV output type %s", rowType))
+	var cycleErr *cyclicCSVOutputTraversalError
+	if errors.As(err, &cycleErr) {
+		return newCyclicCSVOutputValidationError(rowType, cycleErr.offendingType)
 	}
 
 	return err
@@ -64,7 +100,7 @@ func validate(
 		active = make(map[reflect.Type]struct{})
 	}
 	if _, exists := active[rowType]; exists {
-		return errCyclicCSVOutputType
+		return &cyclicCSVOutputTraversalError{offendingType: rowType}
 	}
 
 	cacheKey := csvOutputTypeValidationCacheKey{
@@ -72,13 +108,20 @@ func validate(
 		tagName: tagName,
 	}
 	if cached, exists := csvOutputTypeValidationCache.Load(cacheKey); exists {
-		return cached.(csvOutputTypeValidationCacheValue).err
+		cachedErr := cached.(csvOutputTypeValidationCacheValue).err
+		if !errors.Is(cachedErr, errCyclicCSVOutputType) {
+			return cachedErr
+		}
 	}
 
 	active[rowType] = struct{}{}
 	defer delete(active, rowType)
 	defer func() {
-		csvOutputTypeValidationCache.Store(cacheKey, csvOutputTypeValidationCacheValue{err: err})
+		cachedErr := err
+		if errors.Is(err, errCyclicCSVOutputType) {
+			cachedErr = errCyclicCSVOutputType
+		}
+		csvOutputTypeValidationCache.Store(cacheKey, csvOutputTypeValidationCacheValue{err: cachedErr})
 	}()
 
 	for index := range rowType.NumField() {
@@ -94,6 +137,13 @@ func validate(
 		}
 		if expansionCount, expands := field.Tag.Lookup(tagName + "[]"); expands &&
 			(expansionType.Kind() == reflect.Slice || expansionType.Kind() == reflect.Array) {
+			if field.Anonymous {
+				return customerror.NewInvalidError(fmt.Sprintf(
+					"CSV output type %s uses unsupported csv[] slice expansion on anonymous field %s: gocsv drops anonymous non-struct fields entirely, so the tag cannot take effect; move the tag to a named field",
+					rowType,
+					field.Name,
+				))
+			}
 			if field.Type.Kind() != reflect.Slice && field.Type.Kind() != reflect.Array {
 				return customerror.NewInvalidError(fmt.Sprintf(
 					"CSV output type %s uses unsupported csv[] slice expansion on field %s: pointer-wrapped slice or array fields are ignored by gocsv; move the tag to a direct slice or array field",
@@ -140,6 +190,19 @@ func validate(
 		}
 	}
 	return nil
+}
+
+func newCyclicCSVOutputValidationError(
+	requestedType reflect.Type,
+	offendingType reflect.Type,
+) error {
+	validationErr := &cyclicCSVOutputValidationError{
+		requestedType: requestedType,
+		offendingType: offendingType,
+	}
+	validationErr.invalid = customerror.NewInvalidError(validationErr.message())
+
+	return validationErr
 }
 
 func gocsvCanMarshal(typ reflect.Type) bool {
