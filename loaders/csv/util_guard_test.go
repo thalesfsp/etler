@@ -29,8 +29,8 @@ func TestLoad_rejectsInterfaceElement(t *testing.T) {
 	})
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported element type")
-	assert.ErrorContains(t, err, "interface {}")
+	assert.ErrorContains(t, err, "gocsv panic for CSV output type []interface {}")
+	assert.ErrorContains(t, err, "runtime error")
 }
 
 func TestLoad_rejectsInterfaceField(t *testing.T) {
@@ -48,8 +48,8 @@ func TestLoad_rejectsInterfaceField(t *testing.T) {
 	})
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported interface field")
-	assert.ErrorContains(t, err, "Value")
+	assert.ErrorContains(t, err, "gocsv panic for CSV output type []csv.Row")
+	assert.ErrorContains(t, err, "reflect: Elem of invalid type interface {}")
 }
 
 func TestLoad_rejectsPointerToInterfaceField(t *testing.T) {
@@ -67,8 +67,8 @@ func TestLoad_rejectsPointerToInterfaceField(t *testing.T) {
 	})
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported interface field")
-	assert.ErrorContains(t, err, "Value")
+	assert.ErrorContains(t, err, "gocsv panic for CSV output type []csv.Row")
+	assert.ErrorContains(t, err, "reflect: Elem of invalid type interface {}")
 }
 
 func TestLoad_rejectsNestedInterfaceField(t *testing.T) {
@@ -89,8 +89,8 @@ func TestLoad_rejectsNestedInterfaceField(t *testing.T) {
 	})
 	assert.Nil(t, out)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported interface field")
-	assert.ErrorContains(t, err, "Value")
+	assert.ErrorContains(t, err, "gocsv panic for CSV output type []csv.Row")
+	assert.ErrorContains(t, err, "reflect: Elem of invalid type interface {}")
 }
 
 func TestLoad_ignoresInterfaceFields(t *testing.T) {
@@ -156,9 +156,7 @@ func TestLoad_rejectsAnonymousNamedString(t *testing.T) {
 		out, err = Load[[]Row](strings.NewReader("Name\nalice\n"))
 	})
 	assert.Nil(t, out)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported anonymous field")
-	assert.ErrorContains(t, err, "Name")
+	assert.EqualError(t, err, "no csv struct tags found")
 }
 
 func TestLoad_rejectsAnonymousSlice(t *testing.T) {
@@ -167,11 +165,16 @@ func TestLoad_rejectsAnonymousSlice(t *testing.T) {
 		Items
 	}
 
-	out, err := Load[[]row](strings.NewReader("Items\nalice\n"))
+	var (
+		out []row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]row](strings.NewReader("Items\nalice\n"))
+	})
 	assert.Nil(t, out)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported anonymous field")
-	assert.ErrorContains(t, err, "Items")
+	assert.EqualError(t, err, "no csv struct tags found")
 }
 
 func TestLoad_rejectsAnonymousMap(t *testing.T) {
@@ -180,11 +183,16 @@ func TestLoad_rejectsAnonymousMap(t *testing.T) {
 		Values
 	}
 
-	out, err := Load[[]row](strings.NewReader("Values\nalice\n"))
+	var (
+		out []row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]row](strings.NewReader("Values\nalice\n"))
+	})
 	assert.Nil(t, out)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported anonymous field")
-	assert.ErrorContains(t, err, "Values")
+	assert.EqualError(t, err, "no csv struct tags found")
 }
 
 func TestLoad_rejectsAnonymousInterface(t *testing.T) {
@@ -193,11 +201,16 @@ func TestLoad_rejectsAnonymousInterface(t *testing.T) {
 		Value
 	}
 
-	out, err := Load[[]row](strings.NewReader("Value\nalice\n"))
+	var (
+		out []row
+		err error
+	)
+
+	require.NotPanics(t, func() {
+		out, err = Load[[]row](strings.NewReader("Value\nalice\n"))
+	})
 	assert.Nil(t, out)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported anonymous field")
-	assert.ErrorContains(t, err, "Value")
+	assert.EqualError(t, err, "no csv struct tags found")
 }
 
 func TestLoad_acceptsAnonymousStruct(t *testing.T) {
@@ -251,6 +264,44 @@ func TestLoad_rejectsCSVSliceExpansion(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
 	assert.ErrorContains(t, err, "Items")
+}
+
+func TestLoad_rejectsCSVSliceExpansionThroughPointer(t *testing.T) {
+	type row struct {
+		Items *[]int `csv:"Items" csv[]:"1"`
+	}
+
+	out, err := Load[[]row](strings.NewReader("Items[0]\n7\n"))
+	assert.Nil(t, out)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
+	assert.ErrorContains(t, err, "Items")
+}
+
+func TestLoad_rejectsCSVSliceExpansionThroughOtherWrappers(t *testing.T) {
+	t.Run("pointer to array", func(t *testing.T) {
+		type row struct {
+			Items *[1]int `csv:"Items" csv[]:"1"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("Items[0]\n7\n"))
+		assert.Nil(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
+		assert.ErrorContains(t, err, "Items")
+	})
+
+	t.Run("multiple pointers to slice", func(t *testing.T) {
+		type row struct {
+			Items **[]int `csv:"Items" csv[]:"1"`
+		}
+
+		out, err := Load[[]row](strings.NewReader("Items[0]\n7\n"))
+		assert.Nil(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "unsupported csv[] slice expansion")
+		assert.ErrorContains(t, err, "Items")
+	})
 }
 
 func TestValidateCSVOutputType_rejectsCycles(t *testing.T) {

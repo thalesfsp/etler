@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -554,12 +555,22 @@ func TestLoad_rejectsCyclicOutputType(t *testing.T) {
 		assert.ErrorContains(t, err, "cyclic CSV output type")
 
 		return
+	case "ignored-pointer":
+		debug.SetMaxStack(1 << 20)
+
+		out, err := Load[[]IgnoredPointerCycle](strings.NewReader("Name\nalice\n"))
+		assert.Nil(t, out)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "cyclic CSV output type")
+
+		return
 	}
 
-	for _, cycle := range []string{"pointer", "slice"} {
+	for _, cycle := range []string{"pointer", "slice", "ignored-pointer"} {
 		command := exec.Command(os.Args[0], "-test.run=^TestLoad_rejectsCyclicOutputType$")
-		command.Env = append(os.Environ(), helperEnvironment+"="+cycle)
-		require.NoError(t, command.Run(), "%s cycle crashed subprocess", cycle)
+		command.Env = append(os.Environ(), helperEnvironment+"="+cycle, "GOTRACEBACK=none")
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, "%s cycle crashed subprocess:\n%s", cycle, output)
 	}
 }
 
@@ -569,6 +580,10 @@ type PointerCycle struct {
 
 type SliceCycle struct {
 	Children []SliceCycle
+}
+
+type IgnoredPointerCycle struct {
+	*IgnoredPointerCycle `csv:"-"`
 }
 
 func TestLoad_pointerRowsAndConversionErrors(t *testing.T) {
