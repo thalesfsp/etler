@@ -182,6 +182,29 @@ Then make each applicable migration below:
   gocsv's tag name, tag separator, field combiner, header normalizer, and
   duplicate-header settings; `gocsv.FailIfUnmatchedStructTags` does not affect
   it.
+
+  **Two output shapes are rejected before decoding.** A cyclic output type is
+  rejected because gocsv would recurse until the process dies of an
+  unrecoverable stack overflow, which no `recover` can catch. A `csv[]` tag is
+  rejected, including on a pointer-wrapped slice, because gocsv silently ignores
+  it there and the columns would vanish without an error.
+
+  Cycle rejection mirrors gocsv's own traversal, so a shape gocsv treats as a
+  single value is accepted. A field type implementing `MarshalCSV`,
+  `MarshalText`, `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf; a
+  `csv:"-"` tag on a named (non-embedded) field skips it entirely; only one
+  pointer level is followed, so `**T` is a leaf. A type implementing only
+  `encoding.TextUnmarshaler` is **not** a leaf, because gocsv descends into it.
+
+  **Field matching is gocsv's, and two cases resolve silently.** When an outer
+  field shadows an embedded one of the same name, a matching header fills the
+  *embedded* field, not the outer field that shadows it in Go's own rules. When
+  two fields carry the same `csv` tag, only the first is filled. Neither reports
+  an error; give colliding fields distinct `csv` tags.
+
+  A panic raised by your own `UnmarshalCSV` or `UnmarshalText` is caught by the
+  same guard that catches gocsv's, so it is reported as a gocsv panic naming the
+  output type.
 - **Wrap options passed to storage constructors.** Storage constructors now
   take their own option types. Use
   `converters/storage.WithConverterOptions(opt)` or

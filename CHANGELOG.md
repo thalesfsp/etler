@@ -15,7 +15,7 @@ Major release. Module path is now `github.com/thalesfsp/etler/v4`.
 
 The release hardens lifecycle concurrency, fixes tracing and storage failure
 paths, replaces the CSV loader's JSON round trip with direct gocsv decoding, and
-brings statement coverage to 99.1%.
+brings statement coverage to 99.3%.
 
 ### Breaking changes
 
@@ -52,7 +52,20 @@ brings statement coverage to 99.1%.
   `json:"age,string"` workaround is no longer needed — plain `int`, `float64`
   and `bool` fields decode directly. The loader also no longer strips tab
   characters, which previously corrupted legitimately quoted content such as
-  `"a\tb"`. Output types using gocsv's `csv[]` slice expansion are rejected.
+  `"a\tb"`. Output types using gocsv's `csv[]` slice expansion are rejected,
+  including through pointer wrappers: gocsv silently ignores that tag on a
+  `*[]T` field, so the columns the caller expected to expand would vanish
+  without an error.
+
+  Two further shapes are rejected because gocsv cannot survive them: a cyclic
+  output type, which makes gocsv recurse until the process dies of an
+  unrecoverable stack overflow. Rejection mirrors gocsv's own traversal rules,
+  so a shape gocsv treats as a single value is accepted: a field whose type
+  implements `MarshalCSV`, `MarshalText`, `UnmarshalCSV`, or
+  `UnmarshalCSVWithFields` is a leaf, a `csv:"-"` field on a named (non-embedded)
+  field is skipped entirely, and only one pointer level is followed. A type
+  implementing only `encoding.TextUnmarshaler` is **not** a leaf, because gocsv
+  descends into it.
 
   Loading and writing are not symmetric. The converter writes with
   `gocsv.MarshalString`, uses gocsv's writer factory, and supports `csv[]`.
@@ -126,6 +139,26 @@ removed, as listed under breaking changes.
 
 ### Fixed
 
+- **The CSV loader hung forever on some cyclic output types, and silently
+  dropped columns in others.** Its guard predicted gocsv's recursion with its own
+  rules rather than gocsv's, and the two disagreed. It stopped descending on the
+  unmarshal-side interfaces while gocsv stops on the marshal-side set, so a type
+  implementing only `encoding.TextUnmarshaler` was a leaf here and a recursion
+  target there. A cycle behind such a type passed validation and then hung inside
+  gocsv — `Load` never returned — and a `csv[]` field nested inside one was never
+  seen, so its columns were dropped with no error. The same gap rejected shapes
+  gocsv handles perfectly: cycles behind `MarshalText`, `UnmarshalCSVWithFields`,
+  a double pointer, a `csv:"-"` field, or `*[]T`. The guard now mirrors gocsv's
+  traversal decision for decision.
+- **A processor that filtered everything out failed its stage.** The idiomatic
+  `var out []T` plus `append` returns nil when it keeps nothing, and the
+  concurrent converter rejects nil input, so an ordinary empty result surfaced as
+  `items cannot be nil`. Nothing documented a non-nil requirement. A nil
+  processor result is now treated as an empty one.
+- **`Duration` included the completion callback** on `Converter`, `Loader`,
+  `Processor`, and `Stage`: a no-op converter with a 200 ms `OnFinished` reported
+  202 ms. All four now record duration before invoking the callback, matching
+  `Pipeline`.
 - **`ExtractID` killed the process on a cyclic embedded pointer.** A
   self-referential exported embedded pointer recursed until the stack
   overflowed — a fatal error, not a recoverable panic. Traversal now records
@@ -186,10 +219,10 @@ mutate their input slice or the values it points to.
   zero-value data-loss bug, async failure, pause/resume, and context
   cancellation.
 - README installation, quick start, concurrency contract, and a v3 upgrade guide.
-- Current statement coverage is 99.1%; `processor`, `processors/storage`,
-  `converters/storage`, `converters/csv`, `converters/passthru`, `task`,
-  `internal/logging`, and `internal/metrics` report 100%, and `loaders/csv`
-  reports 98.8%.
+- Current statement coverage is 99.3%; `processor`, `processors/storage`,
+  `converters/storage`, `converters/csv`, `converters/passthru`, `loaders/csv`,
+  `task`, `internal/logging`, `internal/metrics`, and `internal/shared` report
+  100%.
 
 ## [3.0.0] - 2026-07-03
 

@@ -31,16 +31,29 @@ var (
 //////
 
 // Load converts CSV data to a slice. It rejects nil readers and non-slice output
-// types. Two row shapes are rejected up front: cycles, which can cause a fatal
-// stack overflow in gocsv, and csv[] expansion, which can silently discard
-// columns. Other type incompatibilities are delegated to gocsv; any panic from
-// gocsv is returned as an error naming the output type and recovered value.
+// types. Two row shapes are rejected up front: cycles, which make gocsv recurse
+// until the process dies of an unrecoverable stack overflow, and csv[]
+// expansion, which can silently discard columns. Other type incompatibilities
+// are delegated to gocsv; any panic is returned as an error naming the output
+// type and recovered value. That guard also covers a panic raised by a
+// caller-supplied UnmarshalCSV or UnmarshalText, which is reported the same way.
+//
+// Cycle rejection mirrors gocsv's own traversal, so a shape gocsv collapses to a
+// single value is accepted: a field type implementing MarshalCSV, MarshalText,
+// UnmarshalCSV, or UnmarshalCSVWithFields is a leaf, a csv:"-" tag on a named
+// field skips it, and only one pointer level is followed. A type implementing
+// only encoding.TextUnmarshaler is not a leaf, because gocsv descends into it.
+// The csv[] check is deliberately stricter than gocsv and follows every pointer
+// level, because gocsv ignores that tag on a *[]T field and loses the columns.
 //
 // By default gocsv resolves field keys case-sensitively, but header matching is
 // not byte-exact: Name also matches a header with surrounding whitespace or
 // U+200B, U+200C, U+200D, and U+FEFF zero-width characters removed. A
 // process-wide gocsv header normalizer can change that rule; use explicit csv
-// tags when accepted spelling must be unambiguous.
+// tags when accepted spelling must be unambiguous. Two collisions resolve
+// silently: a header matching a field shadowed by an outer field of the same
+// name fills the shadowed embedded field, and when two fields share a csv tag
+// only the first is filled.
 //
 // Numeric conversion uses gocsv's permissive, not range-safe semantics: 010
 // decodes as 8, 1_0 as 10, and 127.9 into an integer as 127. Out-of-range
