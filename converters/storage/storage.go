@@ -109,10 +109,11 @@ func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, erro
 
 // New creates a storage converter. For each item it resolves the ID from
 // WithIDFunc, then the configured or default ID/Id field, then a SHA-256 key
-// derived from the item's JSON. The built-in field and content paths produce a
-// stable key for stable input; a custom IDFunc determines its own stability.
-// Whether repeated writes are idempotent depends on the storage backend's
-// Create implementation.
+// derived from the item's JSON. The field path is stable for an unchanged
+// field. The content path is stable only when JSON serialization is
+// deterministic; a custom MarshalJSON method can vary it. A custom IDFunc
+// determines its own stability. Whether repeated writes are idempotent depends
+// on the storage backend's Create implementation.
 func New[In any](
 	s storage.IStorage,
 	target string,

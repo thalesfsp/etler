@@ -126,9 +126,10 @@ func resolveID[In any](ctx context.Context, cfg config[In], in In) (string, erro
 // WithIDFunc, then the configured or default ID/Id field, then a SHA-256 key
 // derived from the item's JSON. It prepends idPrefix before calling Create.
 //
-// The built-in field and content paths produce a stable key for stable input; a
-// custom IDFunc determines its own stability. Whether repeated writes are
-// idempotent depends on the storage backend's Create implementation.
+// The field path is stable for an unchanged field. The content path is stable
+// only when JSON serialization is deterministic; a custom MarshalJSON method
+// can vary it. A custom IDFunc determines its own stability. Whether repeated
+// writes are idempotent depends on the storage backend's Create implementation.
 //
 // NOTE: Concurrency values below 1 are treated as 1.
 // NOTE: An idPrefix can namespace keys, for example "news-".

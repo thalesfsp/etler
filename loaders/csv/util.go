@@ -28,18 +28,21 @@ var (
 // Loader.
 //////
 
-// Load converts CSV data to a slice of structs. Untagged fields match headers
-// exactly and case-sensitively: Name matches "Name", not "name"; use
-// `csv:"name"` to match the latter. Output types using csv[] slice expansion
-// are unsupported.
+// Load converts CSV data to a slice of structs. By default gocsv resolves field
+// keys case-sensitively, but header matching is not byte-exact: Name also
+// matches a header with surrounding whitespace or U+200B, U+200C, U+200D, and
+// U+FEFF zero-width characters removed. A process-wide gocsv header normalizer
+// can change that rule; use explicit csv tags when accepted spelling must be
+// unambiguous. Output types using csv[] slice expansion are unsupported.
 //
 // Numeric conversion uses gocsv's permissive, not range-safe semantics: 010
 // decodes as 8, 1_0 as 10, and 127.9 into an integer as 127. Out-of-range
 // values may wrap or become infinite. Callers requiring a numeric syntax or
 // range guarantee should decode into a string field and parse it themselves.
-// Other behavior comes from gocsv's Unmarshaller. Its package-level tag, header,
-// and duplicate settings influence Load; its reader factory and
-// FailIfUnmatchedStructTags do not.
+// Load strips one leading UTF-8 BOM and constructs encoding/csv.NewReader
+// directly. Other decoding behavior comes from gocsv's Unmarshaller. Its
+// package-level tag, header, and duplicate settings influence Load; its reader
+// factory and FailIfUnmatchedStructTags do not.
 func Load[Out any](in io.Reader) (Out, error) {
 	outType := reflect.TypeOf((*Out)(nil)).Elem()
 	if outType.Kind() != reflect.Slice {
