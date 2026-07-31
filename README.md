@@ -110,9 +110,11 @@ Three rules the design relies on:
 - **Processors must not mutate their input slice, or the values it points to.**
   A stage reuses the returned slice as the next processor's input, and async
   processors receive only a shallow copy.
-- **A single `Pipeline` or `Stage` instance must not be `Run` concurrently with
-  itself.** Each instance owns its progress, status and duration metrics.
-  Separate instances are independent — with one exception: under
+- **Concurrent `Run` calls on one `Pipeline` are serialized.** Its lifecycle,
+  progress and duration describe the active or most recently completed run.
+  Completion callbacks run after that serialization is released, so two runs'
+  callbacks may overlap — a callback must be safe for concurrent use.
+  Separate instances are independent, with one exception: under
   `ETLER_METRICS_PUBLISH=true`, two entities of the same type sharing a name
   deliberately share the same published `expvar`s.
 

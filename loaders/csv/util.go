@@ -274,7 +274,12 @@ func gocsvNumericField(headers []string, rowType reflect.Type, fields []csvField
 	values[len(values)-1] = "1"
 	var probeSource bytes.Buffer
 	writer := stdcsv.NewWriter(&probeSource)
-	writer.WriteAll([][]string{headers, values})
+	if err := writer.WriteAll([][]string{headers, values}); err != nil {
+		return nil, customerror.NewFailedToError("build the CSV header probe",
+			customerror.WithError(err),
+		)
+	}
+
 	unmarshaller, err := gocsv.NewUnmarshaller(stdcsv.NewReader(&probeSource), reflect.New(rowType).Elem().Interface())
 	if err != nil {
 		return nil, err

@@ -135,10 +135,14 @@ discarded logging work is skipped.
   matching every other entity. Callers passing `""` now get an error.
 
 ### Documented
-Three contracts the design already relied on but never stated: converters must
-be safe for concurrent use (a stage fans conversion out per item), processors
-must not mutate their input slice or the values it points to, and a single
-pipeline or stage instance must not be `Run` concurrently with itself.
+Contracts the design relied on but never stated: converters must be safe for
+concurrent use (a stage fans conversion out per item), and processors must not
+mutate their input slice or the values it points to.
+
+Concurrent `Run` calls on one `Pipeline` used to be a documented footgun; they
+are now serialized instead. The completion callback runs after that
+serialization is released — a callback that started a nested `Run` previously
+deadlocked — so callbacks may overlap and must be concurrency-safe.
 
 ### Added
 - **12 new runnable examples** (13 in total) across `etler`, `pipeline`,
