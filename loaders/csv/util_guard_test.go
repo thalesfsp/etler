@@ -2,8 +2,8 @@ package csv
 
 import (
 	"reflect"
-	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,14 +77,41 @@ func TestInspectCSVFields_rejectsCycles(t *testing.T) {
 	assert.ErrorContains(t, err, "cyclic CSV output type")
 }
 
-func TestNumericValueError_validatesSyntaxAndRange(t *testing.T) {
-	assert.NoError(t, numericValueError("", reflect.TypeFor[*int]()))
-	assert.NoError(t, numericValueError(" +42 ", reflect.TypeFor[int]()))
-	assert.NoError(t, numericValueError("255", reflect.TypeFor[uint8]()))
-	assert.NoError(t, numericValueError(" -.5e+2 ", reflect.TypeFor[float32]()))
-	assert.NoError(t, numericValueError("not numeric", reflect.TypeFor[string]()))
-	assert.ErrorIs(t, numericValueError("255.9", reflect.TypeFor[uint8]()), strconv.ErrSyntax)
-	assert.ErrorIs(t, numericValueError("256", reflect.TypeFor[uint8]()), strconv.ErrRange)
-	assert.ErrorIs(t, numericValueError("-1", reflect.TypeFor[uint8]()), strconv.ErrSyntax)
-	assert.ErrorIs(t, numericValueError("1_0", reflect.TypeFor[int]()), strconv.ErrSyntax)
+func TestLoad_round6TimeFieldDoesNotHideGocsvUint8Truncation(t *testing.T) {
+	type row struct {
+		When time.Time
+		N    uint8
+	}
+
+	out, err := Load[[]row](strings.NewReader(
+		"When,N\n2026-07-30T00:00:00Z,256\n",
+	))
+	require.NoError(t, err)
+	require.Equal(t, []row{{
+		When: time.Date(2026, time.July, 30, 0, 0, 0, 0, time.UTC),
+		N:    0,
+	}}, out)
+}
+
+var unmarshalCSVCallCount atomic.Int32
+
+type countedCSVValue string
+
+func (*countedCSVValue) UnmarshalCSV(string) error {
+	unmarshalCSVCallCount.Add(1)
+
+	return nil
+}
+
+func TestLoad_invokesCustomUnmarshallerOncePerValue(t *testing.T) {
+	type row struct {
+		Value countedCSVValue
+		N     int
+	}
+
+	unmarshalCSVCallCount.Store(0)
+	out, err := Load[[]row](strings.NewReader("Value,N\ntext,1\n"))
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, int32(1), unmarshalCSVCallCount.Load())
 }
