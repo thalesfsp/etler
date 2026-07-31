@@ -239,8 +239,9 @@ func (c *Converter[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 
 // New creates a converter. It applies options in order, retains each returned
 // implementation, and then validates the result. Nil options and results are
-// rejected; the final implementation must expose non-nil lifecycle metrics and
-// pass validation. fn must be safe for concurrent use.
+// rejected. Structural validation runs before lifecycle metric getters; the
+// final implementation must expose non-nil lifecycle metrics. fn must be safe
+// for concurrent use.
 func New[In, Out any](
 	name, description string,
 	fn Convert[In, Out],
@@ -283,12 +284,12 @@ func New[In, Out any](
 		}
 	}
 
-	if err := validateOptionMetrics(c); err != nil {
+	// Validation.
+	if err := validation.Validate(c); err != nil {
 		return nil, err
 	}
 
-	// Validation.
-	if err := validation.Validate(c); err != nil {
+	if err := validateOptionMetrics(c); err != nil {
 		return nil, err
 	}
 

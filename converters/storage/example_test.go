@@ -32,7 +32,8 @@ func ExampleNew() {
 	// key from item: true
 }
 
-// Demonstrates that retrying the same item uses the same deterministic ID.
+// Demonstrates that equal items share a deterministic ID while different
+// items do not.
 func ExampleStorage_deterministicID() {
 	store := &stubStorage{}
 	converter, err := New[exampleItem](store, "items")
@@ -40,18 +41,32 @@ func ExampleStorage_deterministicID() {
 		panic(err)
 	}
 
-	item := exampleItem{Name: "notebook"}
-	firstID, err := converter.Run(context.Background(), item)
+	firstID, err := converter.Run(
+		context.Background(),
+		exampleItem{Name: "notebook"},
+	)
 	if err != nil {
 		panic(err)
 	}
-	secondID, err := converter.Run(context.Background(), item)
+	equalID, err := converter.Run(
+		context.Background(),
+		exampleItem{Name: "notebook"},
+	)
+	if err != nil {
+		panic(err)
+	}
+	differentID, err := converter.Run(
+		context.Background(),
+		exampleItem{Name: "pencil"},
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("same ID:", firstID == secondID)
+	fmt.Println("equal items:", firstID == equalID)
+	fmt.Println("different items:", firstID != differentID)
 
 	// Output:
-	// same ID: true
+	// equal items: true
+	// different items: true
 }

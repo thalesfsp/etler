@@ -14,7 +14,9 @@ import (
 type Func[ProcessedData, ConvertedOut any] func(p IPipeline[ProcessedData, ConvertedOut]) IPipeline[ProcessedData, ConvertedOut]
 
 // OnFinished runs after a pipeline succeeds. originalTask is built from the
-// input data; tasksOut contains one result per stage in stage order.
+// input data; tasksOut contains one result per stage in stage order. Callbacks
+// run after serialized execution is released, may overlap with a later run's
+// callback, and must be safe for concurrent use.
 type OnFinished[ProcessedData, ConvertedOut any] func(ctx context.Context, p IPipeline[ProcessedData, ConvertedOut], originalTask task.Task[ProcessedData, ConvertedOut], tasksOut []task.Task[ProcessedData, ConvertedOut])
 
 //////

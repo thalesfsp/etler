@@ -24,12 +24,21 @@ func ExampleNew() {
 		panic(err)
 	}
 
+	stored := store.createdValues()
+
 	fmt.Println("items:", out)
 	fmt.Println("written:", store.created.Load())
+	fmt.Println(
+		"values stored:",
+		len(stored) == len(items) &&
+			stored[0] == items[0] &&
+			stored[1] == items[1],
+	)
 
 	// Output:
 	// items: [{ pencil} { notebook}]
 	// written: 2
+	// values stored: true
 }
 
 // Demonstrates selecting the item field used as the storage key.

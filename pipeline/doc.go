@@ -4,6 +4,7 @@
 // Concurrent pipelines give every stage the original task. Both modes return
 // one result per stage in declaration order.
 //
-// A pipeline can pause processors before their next execution. A single
-// Pipeline instance must not be run concurrently with itself.
+// A pipeline can pause processors before their next execution. Concurrent Run
+// calls on one Pipeline are serialized; completion callbacks run after that
+// serialization is released and must be concurrency-safe.
 package pipeline

@@ -29,6 +29,9 @@ import (
 const Type = "pipeline"
 
 // Pipeline runs a configured sequence of stages and records lifecycle metrics.
+// Concurrent Run calls are serialized; lifecycle, progress, and duration
+// describe the active or most recently completed run. Completion callbacks run
+// after serialized execution is released and may overlap.
 type Pipeline[ProcessedData any, ConvertedOut any] struct {
 	// ConcurrentStage determines whether all stages receive the original task
 	// concurrently or each stage receives the preceding stage's output.
@@ -63,6 +66,9 @@ type Pipeline[ProcessedData any, ConvertedOut any] struct {
 
 	// mu guards onFinished.
 	mu sync.RWMutex
+
+	// runMu serializes Run calls so configured stages never overlap.
+	runMu sync.Mutex
 
 	// pause is this pipeline's pause controller. Pausing one pipeline does
 	// not affect any other.
@@ -220,14 +226,10 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) GetMetrics() map[string]string {
 	}
 }
 
-// UpdateObservability marks a run done, records its duration, invokes the
-// callback, and logs its metrics. tasksOut contains one result per stage in
-// stage order.
-func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
-	ctx context.Context,
+// updateCompletionObservability marks a run done, records its duration, and
+// logs its metrics.
+func (p *Pipeline[ProcessedData, ConvertedOut]) updateCompletionObservability(
 	now time.Time,
-	originalTask task.Task[ProcessedData, ConvertedOut],
-	tasksOut []task.Task[ProcessedData, ConvertedOut],
 ) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
@@ -238,11 +240,6 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 	p.GetCounterDone().Add(1)
 
 	p.GetDuration().Set(time.Since(now).Milliseconds())
-
-	onFinished := p.GetOnFinished()
-	if onFinished != nil {
-		onFinished(ctx, p, originalTask, tasksOut)
-	}
 
 	if logging.Admits(p.GetLogger(), level.Debug) {
 		p.GetLogger().PrintWithOptions(
@@ -259,6 +256,31 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
 			sypl.WithField("status", p.GetStatus().String()),
 		)
 	}
+}
+
+// runOnFinished invokes the current completion callback after serialized run
+// state has been released.
+func (p *Pipeline[ProcessedData, ConvertedOut]) runOnFinished(
+	ctx context.Context,
+	originalTask task.Task[ProcessedData, ConvertedOut],
+	tasksOut []task.Task[ProcessedData, ConvertedOut],
+) {
+	onFinished := p.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, p, originalTask, tasksOut)
+	}
+}
+
+// UpdateObservability marks a run done, records and logs its metrics, and
+// invokes the callback. tasksOut contains one result per stage in stage order.
+func (p *Pipeline[ProcessedData, ConvertedOut]) UpdateObservability(
+	ctx context.Context,
+	now time.Time,
+	originalTask task.Task[ProcessedData, ConvertedOut],
+	tasksOut []task.Task[ProcessedData, ConvertedOut],
+) {
+	p.updateCompletionObservability(now)
+	p.runOnFinished(ctx, originalTask, tasksOut)
 }
 
 // GetProgress returns the number of stages completed in the current or most
@@ -290,9 +312,21 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) SetProgressPercent() {
 
 // Run executes the pipeline. Sequential mode feeds each stage's full task into
 // the next; concurrent mode gives every stage the original task. Both modes
-// return one task per stage in stage order. A pipeline instance must not run
-// concurrently with itself; separate instances run independently.
+// return one task per stage in stage order. Concurrent calls on one pipeline
+// are serialized; lifecycle, progress, and duration describe the active or
+// most recently completed run. Completion callbacks run after serialization
+// is released and must be concurrency-safe. Separate instances run
+// independently.
 func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, processingData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error) {
+	p.runMu.Lock()
+	runLocked := true
+
+	defer func() {
+		if runLocked {
+			p.runMu.Unlock()
+		}
+	}()
+
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
@@ -319,6 +353,14 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	// Make this pipeline's pause controller visible to its processors.
 	tracedContext = shared.ContextWithPause(tracedContext, p.pause)
 
+	// Publish the run lifecycle transition before task validation so every
+	// attempt agrees with the running trace and counter already recorded.
+	p.setStatus(status.Runnning)
+
+	if logging.Admits(p.GetLogger(), level.Trace) {
+		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	}
+
 	// Task initialization.
 	tsk, err := task.New[ProcessedData, ConvertedOut](processingData)
 	if err != nil {
@@ -330,13 +372,6 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 			p.GetLogger(),
 			p.GetCounterFailed(),
 		)
-	}
-
-	// Publish the run lifecycle transition even if its controller is paused.
-	p.setStatus(status.Runnning)
-
-	if logging.Admits(p.GetLogger(), level.Trace) {
-		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
 	}
 
 	// Progress is relative to the current run.
@@ -395,8 +430,13 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 		// read-format-set sequences can interleave and leave a stale value.
 		p.SetProgressPercent()
 
-		p.UpdateObservability(ctx, now, originalTask, stagesOut)
+		p.updateCompletionObservability(now)
 		durationSet = true
+
+		p.runMu.Unlock()
+		runLocked = false
+
+		p.runOnFinished(ctx, originalTask, stagesOut)
 
 		return stagesOut, nil
 	}
@@ -440,8 +480,13 @@ func (p *Pipeline[ProcessedData, ConvertedOut]) Run(ctx context.Context, process
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	p.UpdateObservability(ctx, now, originalTask, tasksOut)
+	p.updateCompletionObservability(now)
 	durationSet = true
+
+	p.runMu.Unlock()
+	runLocked = false
+
+	p.runOnFinished(ctx, originalTask, tasksOut)
 
 	return tasksOut, nil
 }

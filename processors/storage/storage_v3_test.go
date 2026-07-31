@@ -29,6 +29,7 @@ type stubStorage struct {
 	mu       sync.Mutex
 	ids      []string
 	targets  []string
+	values   []any
 	created  atomic.Int64
 	failWith error
 }
@@ -52,6 +53,7 @@ func (s *stubStorage) Create(ctx context.Context, id, target string, v any, prm 
 	s.mu.Lock()
 	s.ids = append(s.ids, id)
 	s.targets = append(s.targets, target)
+	s.values = append(s.values, v)
 	s.mu.Unlock()
 
 	if s.failWith != nil {
@@ -75,6 +77,13 @@ func (s *stubStorage) createdTargets() []string {
 	defer s.mu.Unlock()
 
 	return append([]string(nil), s.targets...)
+}
+
+func (s *stubStorage) createdValues() []any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]any(nil), s.values...)
 }
 
 // Missing storage is rejected during construction, including an interface

@@ -61,6 +61,10 @@ type converterValueGuard struct {
 	IConverter[int, int]
 }
 
+type converterMissingImplementationGuard struct {
+	IConverter[int, int] `validate:"required"`
+}
+
 func newGuardConverter(t *testing.T) IConverter[int, int] {
 	t.Helper()
 
@@ -118,11 +122,28 @@ func TestValidateOptionMetrics_checksEveryConverterMetric(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.EqualError(t, validateOptionMetrics(tt.value), tt.wantErr)
+			var (
+				c   IConverter[int, int]
+				err error
+			)
+
+			assert.NotPanics(t, func() {
+				c, err = New(
+					"converter-guard-"+tt.name,
+					"converter guard",
+					func(_ context.Context, in int) (int, error) {
+						return in, nil
+					},
+					func(IConverter[int, int]) IConverter[int, int] {
+						return tt.value
+					},
+				)
+			})
+
+			assert.Nil(t, c)
+			assert.EqualError(t, err, tt.wantErr)
 		})
 	}
-
-	assert.NoError(t, validateOptionMetrics(base))
 }
 
 func TestIsNilOptionResult_converterValues(t *testing.T) {
@@ -131,22 +152,70 @@ func TestIsNilOptionResult_converterValues(t *testing.T) {
 	var typedNil *converterValueGuard
 
 	tests := []struct {
-		name  string
-		value IConverter[int, int]
-		want  bool
+		name    string
+		value   IConverter[int, int]
+		wantErr string
 	}{
-		{name: "plain nil", value: plainNil, want: true},
-		{name: "typed nil pointer", value: typedNil, want: true},
+		{
+			name:    "plain nil",
+			value:   plainNil,
+			wantErr: "converter option result required",
+		},
+		{
+			name:    "typed nil pointer",
+			value:   typedNil,
+			wantErr: "converter option result required",
+		},
 		{
 			name:  "non-nil value",
 			value: converterValueGuard{IConverter: base},
-			want:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isNilOptionResult(tt.value))
+			c, err := New(
+				"converter-option-result-"+tt.name,
+				"converter option result",
+				func(_ context.Context, in int) (int, error) {
+					return in, nil
+				},
+				func(IConverter[int, int]) IConverter[int, int] {
+					return tt.value
+				},
+			)
+
+			if tt.wantErr != "" {
+				assert.Nil(t, c)
+				assert.EqualError(t, err, tt.wantErr)
+
+				return
+			}
+
+			assert.NotNil(t, c)
+			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestNew_validatesOptionResultBeforeMetricGetters(t *testing.T) {
+	var constructorErr error
+
+	assert.NotPanics(t, func() {
+		c, err := New(
+			"converter-structural-validation-first",
+			"converter structural validation first",
+			func(_ context.Context, in int) (int, error) {
+				return in, nil
+			},
+			func(IConverter[int, int]) IConverter[int, int] {
+				return &converterMissingImplementationGuard{}
+			},
+		)
+		constructorErr = err
+
+		assert.Nil(t, c)
+	})
+	require.Error(t, constructorErr)
+	assert.Contains(t, constructorErr.Error(), "invalid struct")
 }

@@ -325,9 +325,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 
 // New creates a processor. It applies options in order, retains each returned
 // implementation, and then validates the result. Nil options and results are
-// rejected; the final implementation must expose non-nil lifecycle metrics and
-// pass validation. The transform must not mutate its input slice or pointed-to
-// values.
+// rejected. Structural validation runs before lifecycle metric getters; the
+// final implementation must expose non-nil lifecycle metrics. The transform
+// must not mutate its input slice or pointed-to values.
 func New[ProcessingData any](
 	name, description string,
 	fn Transform[ProcessingData],
@@ -371,12 +371,12 @@ func New[ProcessingData any](
 		}
 	}
 
-	if err := validateOptionMetrics(p); err != nil {
+	// Validation.
+	if err := validation.Validate(p); err != nil {
 		return nil, err
 	}
 
-	// Validation.
-	if err := validation.Validate(p); err != nil {
+	if err := validateOptionMetrics(p); err != nil {
 		return nil, err
 	}
 
