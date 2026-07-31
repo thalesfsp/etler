@@ -61,6 +61,10 @@ type loaderValueGuard struct {
 	ILoader[string, []int]
 }
 
+type loaderMissingImplementationGuard struct {
+	ILoader[string, []int] `validate:"required"`
+}
+
 func newGuardLoader(t *testing.T) ILoader[string, []int] {
 	t.Helper()
 
@@ -118,11 +122,28 @@ func TestValidateOptionMetrics_checksEveryLoaderMetric(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.EqualError(t, validateOptionMetrics(tt.value), tt.wantErr)
+			var (
+				l   ILoader[string, []int]
+				err error
+			)
+
+			assert.NotPanics(t, func() {
+				l, err = New(
+					"loader-guard-"+tt.name,
+					"loader guard",
+					func(_ context.Context, in string) ([]int, error) {
+						return []int{len(in)}, nil
+					},
+					func(ILoader[string, []int]) ILoader[string, []int] {
+						return tt.value
+					},
+				)
+			})
+
+			assert.Nil(t, l)
+			assert.EqualError(t, err, tt.wantErr)
 		})
 	}
-
-	assert.NoError(t, validateOptionMetrics(base))
 }
 
 func TestIsNilOptionResult_loaderValues(t *testing.T) {
@@ -131,22 +152,70 @@ func TestIsNilOptionResult_loaderValues(t *testing.T) {
 	var typedNil *loaderValueGuard
 
 	tests := []struct {
-		name  string
-		value ILoader[string, []int]
-		want  bool
+		name    string
+		value   ILoader[string, []int]
+		wantErr string
 	}{
-		{name: "plain nil", value: plainNil, want: true},
-		{name: "typed nil pointer", value: typedNil, want: true},
+		{
+			name:    "plain nil",
+			value:   plainNil,
+			wantErr: "loader option result required",
+		},
+		{
+			name:    "typed nil pointer",
+			value:   typedNil,
+			wantErr: "loader option result required",
+		},
 		{
 			name:  "non-nil value",
 			value: loaderValueGuard{ILoader: base},
-			want:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isNilOptionResult(tt.value))
+			l, err := New(
+				"loader-option-result-"+tt.name,
+				"loader option result",
+				func(_ context.Context, in string) ([]int, error) {
+					return []int{len(in)}, nil
+				},
+				func(ILoader[string, []int]) ILoader[string, []int] {
+					return tt.value
+				},
+			)
+
+			if tt.wantErr != "" {
+				assert.Nil(t, l)
+				assert.EqualError(t, err, tt.wantErr)
+
+				return
+			}
+
+			assert.NotNil(t, l)
+			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestNew_validatesOptionResultBeforeMetricGetters(t *testing.T) {
+	var constructorErr error
+
+	assert.NotPanics(t, func() {
+		l, err := New(
+			"loader-structural-validation-first",
+			"loader structural validation first",
+			func(_ context.Context, in string) ([]int, error) {
+				return []int{len(in)}, nil
+			},
+			func(ILoader[string, []int]) ILoader[string, []int] {
+				return &loaderMissingImplementationGuard{}
+			},
+		)
+		constructorErr = err
+
+		assert.Nil(t, l)
+	})
+	require.Error(t, constructorErr)
+	assert.Contains(t, constructorErr.Error(), "invalid struct")
 }

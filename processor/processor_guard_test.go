@@ -69,6 +69,10 @@ type processorValueGuard struct {
 	IProcessor[int]
 }
 
+type processorMissingImplementationGuard struct {
+	IProcessor[int] `validate:"required"`
+}
+
 func newGuardProcessor(t *testing.T) IProcessor[int] {
 	t.Helper()
 
@@ -131,11 +135,28 @@ func TestValidateOptionMetrics_checksEveryProcessorMetric(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.EqualError(t, validateOptionMetrics(tt.value), tt.wantErr)
+			var (
+				p   IProcessor[int]
+				err error
+			)
+
+			assert.NotPanics(t, func() {
+				p, err = New(
+					"processor-guard-"+tt.name,
+					"processor guard",
+					func(_ context.Context, data []int) ([]int, error) {
+						return data, nil
+					},
+					func(IProcessor[int]) IProcessor[int] {
+						return tt.value
+					},
+				)
+			})
+
+			assert.Nil(t, p)
+			assert.EqualError(t, err, tt.wantErr)
 		})
 	}
-
-	assert.NoError(t, validateOptionMetrics(base))
 }
 
 func TestIsNilOptionResult_processorValues(t *testing.T) {
@@ -144,22 +165,70 @@ func TestIsNilOptionResult_processorValues(t *testing.T) {
 	var typedNil *processorValueGuard
 
 	tests := []struct {
-		name  string
-		value IProcessor[int]
-		want  bool
+		name    string
+		value   IProcessor[int]
+		wantErr string
 	}{
-		{name: "plain nil", value: plainNil, want: true},
-		{name: "typed nil pointer", value: typedNil, want: true},
+		{
+			name:    "plain nil",
+			value:   plainNil,
+			wantErr: "processor option result required",
+		},
+		{
+			name:    "typed nil pointer",
+			value:   typedNil,
+			wantErr: "processor option result required",
+		},
 		{
 			name:  "non-nil value",
 			value: processorValueGuard{IProcessor: base},
-			want:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isNilOptionResult(tt.value))
+			p, err := New(
+				"processor-option-result-"+tt.name,
+				"processor option result",
+				func(_ context.Context, data []int) ([]int, error) {
+					return data, nil
+				},
+				func(IProcessor[int]) IProcessor[int] {
+					return tt.value
+				},
+			)
+
+			if tt.wantErr != "" {
+				assert.Nil(t, p)
+				assert.EqualError(t, err, tt.wantErr)
+
+				return
+			}
+
+			assert.NotNil(t, p)
+			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestNew_validatesOptionResultBeforeMetricGetters(t *testing.T) {
+	var constructorErr error
+
+	assert.NotPanics(t, func() {
+		p, err := New(
+			"processor-structural-validation-first",
+			"processor structural validation first",
+			func(_ context.Context, data []int) ([]int, error) {
+				return data, nil
+			},
+			func(IProcessor[int]) IProcessor[int] {
+				return &processorMissingImplementationGuard{}
+			},
+		)
+		constructorErr = err
+
+		assert.Nil(t, p)
+	})
+	require.Error(t, constructorErr)
+	assert.Contains(t, constructorErr.Error(), "invalid struct")
 }

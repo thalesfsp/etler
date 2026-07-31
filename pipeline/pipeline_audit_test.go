@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,141 @@ import (
 	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/status"
 )
+
+func TestPipeline_concurrentRunPauseAndStatusAccess(t *testing.T) {
+	const (
+		iterations = 25
+		workers    = 4
+	)
+
+	pipelineValue, err := New(
+		"concurrent-run-pause-status-audit",
+		"concurrent run pause and status access",
+		false,
+		newIdentityStage(t, "concurrent-run-pause-status-audit-stage"),
+	)
+	require.NoError(t, err)
+
+	p := pipelineValue.(*Pipeline[int, int])
+	start := make(chan struct{})
+
+	legalLifecycleStatus := func(value string) bool {
+		switch status.Status(value) {
+		case status.Created, status.Runnning, status.Done, status.Failed:
+			return true
+		default:
+			return false
+		}
+	}
+
+	var wg sync.WaitGroup
+
+	startWorker := func(work func()) {
+		t.Helper()
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("concurrent pipeline access panicked: %v", recovered)
+				}
+			}()
+
+			<-start
+			work()
+		}()
+	}
+
+	for worker := range workers {
+		startWorker(func() {
+			for iteration := range iterations {
+				_, runErr := p.Run(
+					context.Background(),
+					[]int{worker*iterations + iteration},
+				)
+				if runErr != nil {
+					t.Errorf("Run failed during concurrent access: %v", runErr)
+				}
+			}
+		})
+
+		startWorker(func() {
+			defer p.SetPause(false)
+
+			for iteration := range iterations {
+				p.SetPause((worker+iteration)%2 == 0)
+			}
+		})
+
+		startWorker(func() {
+			for range iterations {
+				paused := p.GetPaused()
+				if paused != status.Paused && paused != status.Runnning {
+					t.Errorf("GetPaused returned illegal value %q", paused)
+				}
+
+				lifecycle := p.GetStatus().Value()
+				if !legalLifecycleStatus(lifecycle) {
+					t.Errorf("GetStatus returned illegal lifecycle value %q", lifecycle)
+				}
+				if lifecycle == status.Paused.String() {
+					t.Errorf("GetStatus returned pause state %q", lifecycle)
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+
+	p.SetPause(false)
+	assert.Equal(t, status.Runnning, p.GetPaused())
+	assert.True(t, legalLifecycleStatus(p.GetStatus().Value()))
+	assert.NotEqual(t, status.Paused.String(), p.GetStatus().Value())
+}
+
+func TestPipeline_onFinishedCanRunPipelineAgain(t *testing.T) {
+	pipelineValue, err := New(
+		"on-finished-reentrant-run-audit",
+		"on-finished can run the pipeline again",
+		false,
+		newIdentityStage(t, "on-finished-reentrant-run-audit-stage"),
+	)
+	require.NoError(t, err)
+
+	p := pipelineValue.(*Pipeline[int, int])
+	nestedRun := make(chan error, 1)
+
+	p.SetOnFinished(func(
+		ctx context.Context,
+		pl IPipeline[int, int],
+		_ task.Task[int, int],
+		_ []task.Task[int, int],
+	) {
+		pl.SetOnFinished(nil)
+
+		_, nestedErr := pl.Run(ctx, []int{2})
+		nestedRun <- nestedErr
+	})
+
+	outerRun := make(chan error, 1)
+
+	go func() {
+		_, runErr := p.Run(context.Background(), []int{1})
+		outerRun <- runErr
+	}()
+
+	select {
+	case runErr := <-outerRun:
+		require.NoError(t, runErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnFinished deadlocked while starting a nested Run")
+	}
+
+	require.NoError(t, <-nestedRun)
+}
 
 // newIdentityStage returns a stage with an identity processor and an identity
 // converter, suitable for int-based pipeline tests.

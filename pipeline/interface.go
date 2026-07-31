@@ -10,7 +10,7 @@ import (
 )
 
 // IPipeline defines pipeline lifecycle, metrics, pause control, and execution.
-// A single implementation must not be run concurrently with itself.
+// Concurrent Run calls on one implementation are serialized.
 type IPipeline[ProcessedData, ConvertedOut any] interface {
 	shared.IMeta
 
@@ -27,7 +27,7 @@ type IPipeline[ProcessedData, ConvertedOut any] interface {
 	SetProgressPercent()
 
 	// GetPaused returns Paused when execution is paused and Runnning otherwise.
-	// Its paused state must agree with GetStatus.
+	// Pause state is independent from GetStatus, which never returns Paused.
 	GetPaused() status.Status
 
 	// SetPause pauses or resumes execution; setting the current state is a
@@ -41,5 +41,8 @@ type IPipeline[ProcessedData, ConvertedOut any] interface {
 	SetOnFinished(onFinished OnFinished[ProcessedData, ConvertedOut])
 
 	// Run executes the stages and returns one task per stage in stage order.
+	// Lifecycle, progress, and duration describe the active or most recently
+	// completed serialized run. Completion callbacks may overlap and must be
+	// concurrency-safe.
 	Run(ctx context.Context, processedData []ProcessedData) ([]task.Task[ProcessedData, ConvertedOut], error)
 }
