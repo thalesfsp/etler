@@ -127,9 +127,11 @@ requires Go 1.25. Beyond that:
   `GetOnFinished`/`SetOnFinished` and `GetAsync`/`SetAsync` accessors, whose
   signatures are unchanged.
 - The CSV loader now maps struct fields by `csv:"..."` tag instead of
-  `json:"..."`, matching the CSV converter. Untagged fields still match their
-  header case-insensitively. Plain `int`, `float64` and `bool` fields decode
-  directly — remove the old `json:"age,string"` workaround.
+  `json:"..."`, matching the CSV converter. In v3, `encoding/json` matched
+  untagged fields case-insensitively; v4 does not. As a required migration
+  step, add `csv:"..."` tags wherever a CSV header differs in case or name from
+  its Go field. Plain `int`, `float64` and `bool` fields decode directly —
+  remove the old `json:"age,string"` workaround.
   **Numeric conversion is gocsv's and is permissive, not range-safe:** `010`
   decodes as `8`, `1_0` as `10`, `127.9` into an integer as `127`, and
   out-of-range values may wrap or become infinite. If you need a syntax or

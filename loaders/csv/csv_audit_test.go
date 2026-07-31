@@ -162,12 +162,12 @@ func TestLoad_missingHeader_leavesStructFieldZero(t *testing.T) {
 	require.Equal(t, []auditTextRow{{Name: "alice"}}, out)
 }
 
-func TestLoad_defaultFieldMapping_isCaseInsensitive(t *testing.T) {
+func TestLoad_differingCaseUntaggedHeadersLeaveFieldsZero(t *testing.T) {
 	in := "nAmE,nOtE\nalice,hello\n"
 
 	out, err := Load[[]auditTextRow](strings.NewReader(in))
 	require.NoError(t, err)
-	require.Equal(t, []auditTextRow{{Name: "alice", Note: "hello"}}, out)
+	require.Equal(t, []auditTextRow{{}}, out)
 }
 
 func TestLoad_readerFailure_propagatesError(t *testing.T) {

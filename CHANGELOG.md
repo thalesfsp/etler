@@ -33,8 +33,10 @@ coverage raised to ~99%.
   [gocsv](https://github.com/gocarina/gocsv) — the same library the CSV
   *converter* already used for writing. Reading and writing are therefore
   symmetric, and plain `int`, `float64` and `bool` struct fields now work.
-  Structs are mapped by `csv:"..."` tag instead of `json:"..."` (untagged
-  fields still match their header case-insensitively), and the
+  Structs are mapped by `csv:"..."` tag instead of `json:"..."`. In v3,
+  `encoding/json` matched untagged fields case-insensitively; v4 does not. As a
+  required migration step, consumers must add `csv:"..."` tags wherever a CSV
+  header differs in case or name from its Go field. The
   `json:"age,string"` workaround is no longer needed — plain `int`, `float64`
   and `bool` fields decode directly. The loader also no longer strips tab
   characters, which previously corrupted legitimately quoted content such as
@@ -44,7 +46,7 @@ coverage raised to ~99%.
   decodes as `8`, `1_0` as `10`, `127.9` into an integer as `127`, and
   out-of-range values may wrap or become infinite. This is a deliberate,
   documented limitation. Validating it requires gocsv's header-to-field
-  mapping, which it builds but keeps unexported with no accessor; three
+  mapping, which it builds but keeps unexported with no accessor; four
   mechanisms that tried to reconstruct it each failed and silently missed
   fields, so the guarantee was withdrawn rather than faked. Callers needing a
   syntax or range guarantee should decode into a `string` field and parse it

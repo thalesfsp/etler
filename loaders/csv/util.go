@@ -24,19 +24,14 @@ var (
 	textUnmarshallerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
-type csvField struct {
-	key  string
-	fold bool
-}
-
 //////
 // Loader.
 //////
 
-// Load converts CSV data to a slice of structs. Untagged field names match
-// case-insensitively through gocsv's per-unmarshaller header normalizer; gocsv
-// resolves all field collisions in declaration order. Output types using csv[]
-// slice expansion are unsupported.
+// Load converts CSV data to a slice of structs. Untagged fields match headers
+// exactly and case-sensitively: Name matches "Name", not "name"; use
+// `csv:"name"` to match the latter. Output types using csv[] slice expansion
+// are unsupported.
 //
 // Numeric conversion uses gocsv's permissive, not range-safe semantics: 010
 // decodes as 8, 1_0 as 10, and 127.9 into an integer as 127. Out-of-range
@@ -56,8 +51,7 @@ func Load[Out any](in io.Reader) (Out, error) {
 	if rowType.Kind() == reflect.Pointer {
 		rowType = rowType.Elem()
 	}
-	fields, err := inspectCSVFields(rowType, "", true, nil)
-	if err != nil {
+	if err := validateCSVOutputType(rowType, nil); err != nil {
 		return *new(Out), err
 	}
 	if isNil(in) {
@@ -75,26 +69,12 @@ func Load[Out any](in io.Reader) (Out, error) {
 		}
 		return *new(Out), err
 	}
-	source, err := io.ReadAll(reader)
-	if err != nil {
-		return *new(Out), err
-	}
-	if _, err := stdcsv.NewReader(bytes.NewReader(source)).ReadAll(); err != nil {
-		return *new(Out), err
-	}
-	csvReader := stdcsv.NewReader(bytes.NewReader(source))
 	prototype := reflect.New(rowType)
 	if outType.Elem().Kind() != reflect.Pointer {
 		prototype = prototype.Elem()
 	}
-	unmarshaller, err := gocsv.NewUnmarshaller(csvReader, prototype.Interface())
+	unmarshaller, err := gocsv.NewUnmarshaller(stdcsv.NewReader(reader), prototype.Interface())
 	if err != nil {
-		return *new(Out), err
-	}
-	headers := normalizeCSVHeaders(unmarshaller.Headers, fields)
-	if err := unmarshaller.RenormalizeHeaders(func([]string) []string {
-		return headers
-	}); err != nil {
 		return *new(Out), err
 	}
 	var out Out
@@ -129,84 +109,49 @@ func isNil(value any) bool {
 	}
 }
 
-func inspectCSVFields(rowType reflect.Type, parentKey string, parentFold bool, active map[reflect.Type]struct{}) ([]csvField, error) {
+func validateCSVOutputType(rowType reflect.Type, active map[reflect.Type]struct{}) error {
 	if rowType.Kind() != reflect.Struct {
-		return nil, nil
+		return nil
 	}
 	if active == nil {
 		active = make(map[reflect.Type]struct{})
 	}
 	if _, exists := active[rowType]; exists {
-		return nil, customerror.NewInvalidError(fmt.Sprintf("cyclic CSV output type %s", rowType))
+		return customerror.NewInvalidError(fmt.Sprintf("cyclic CSV output type %s", rowType))
 	}
 	active[rowType] = struct{}{}
 	defer delete(active, rowType)
-	fields := make([]csvField, 0, rowType.NumField())
 	for index := range rowType.NumField() {
 		field := rowType.Field(index)
 		if !field.IsExported() {
 			continue
 		}
-		key, fold, ignored := csvFieldName(field)
-		if ignored {
+		tagParts := strings.Split(field.Tag.Get(gocsv.TagName), gocsv.TagSeparator)
+		if len(tagParts) == 1 && strings.TrimSpace(tagParts[0]) == "-" {
 			continue
 		}
 		if _, expands := field.Tag.Lookup(gocsv.TagName + "[]"); expands &&
 			(field.Type.Kind() == reflect.Slice || field.Type.Kind() == reflect.Array) {
-			return nil, customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
-		}
-		if field.Anonymous {
-			key, fold = parentKey, parentFold
-		} else {
-			fold = parentFold && fold
-			if fold && parentKey != "" {
-				key = parentKey + gocsv.FieldsCombiner + key
-			}
+			return customerror.NewInvalidError(fmt.Sprintf("CSV output type %s uses unsupported csv[] slice expansion on field %s", rowType, field.Name))
 		}
 		fieldType := field.Type
 		if fieldType.Kind() == reflect.Pointer {
 			fieldType = fieldType.Elem()
 		}
 		if fieldType.Kind() == reflect.Struct && !hasCustomUnmarshaller(fieldType) {
-			nested, err := inspectCSVFields(fieldType, key, fold, active)
-			if err != nil {
-				return nil, err
+			if err := validateCSVOutputType(fieldType, active); err != nil {
+				return err
 			}
-			fields = append(fields, nested...)
 			continue
 		}
 		if (fieldType.Kind() == reflect.Slice || fieldType.Kind() == reflect.Array) &&
 			fieldType.Elem().Kind() == reflect.Struct {
-			if _, err := inspectCSVFields(fieldType.Elem(), "", true, active); err != nil {
-				return nil, err
+			if err := validateCSVOutputType(fieldType.Elem(), active); err != nil {
+				return err
 			}
 		}
-		if field.Anonymous {
-			continue
-		}
-		fields = append(fields, csvField{key: key, fold: fold})
 	}
-	return fields, nil
-}
-
-func csvFieldName(field reflect.StructField) (string, bool, bool) {
-	parts := strings.Split(field.Tag.Get(gocsv.TagName), gocsv.TagSeparator)
-	keys := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		switch {
-		case strings.HasPrefix(part, "partial"), part == "omitempty", strings.HasPrefix(part, "default="):
-		default:
-			keys = append(keys, part)
-		}
-	}
-	if len(keys) == 1 && keys[0] == "-" {
-		return "", false, true
-	}
-	if len(keys) == 0 || keys[0] == "" {
-		return field.Name, true, false
-	}
-	return "", false, false
+	return nil
 }
 
 func hasCustomUnmarshaller(typ reflect.Type) bool {
@@ -215,17 +160,4 @@ func hasCustomUnmarshaller(typ reflect.Type) bool {
 	}
 	return typ.Implements(csvUnmarshallerType) || typ.Implements(textUnmarshallerType) ||
 		reflect.PointerTo(typ).Implements(csvUnmarshallerType) || reflect.PointerTo(typ).Implements(textUnmarshallerType)
-}
-
-func normalizeCSVHeaders(headers []string, fields []csvField) []string {
-	normalized := append([]string(nil), headers...)
-	for index, header := range normalized {
-		for _, field := range fields {
-			if field.fold && strings.EqualFold(header, field.key) {
-				normalized[index] = field.key
-				break
-			}
-		}
-	}
-	return normalized
 }

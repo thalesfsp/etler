@@ -332,23 +332,33 @@ func TestLoad_preservesNumericLookingStrings(t *testing.T) {
 	require.Equal(t, []row{{Text: " 1_0 ", N: 42}}, out)
 }
 
-func TestLoad_matchesUntaggedFieldsCaseInsensitively(t *testing.T) {
-	t.Run("lowercase header", func(t *testing.T) {
+func TestLoad_matchesUntaggedFieldsExactly(t *testing.T) {
+	t.Run("exact-case header populates field", func(t *testing.T) {
+		type row struct {
+			Name string
+		}
+
+		out, err := Load[[]row](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []row{{Name: "alice"}}, out)
+	})
+
+	t.Run("lowercase header leaves field zero without error", func(t *testing.T) {
 		type row struct {
 			Name string
 		}
 
 		out, err := Load[[]row](strings.NewReader("name\nalice\n"))
 		require.NoError(t, err)
-		require.Equal(t, []row{{Name: "alice"}}, out)
+		require.Equal(t, []row{{}}, out)
 	})
 
-	t.Run("tag remains case sensitive", func(t *testing.T) {
+	t.Run("matching tag populates field", func(t *testing.T) {
 		type row struct {
-			Name string `csv:"display_name"`
+			Name string `csv:"name"`
 		}
 
-		out, err := Load[[]row](strings.NewReader("name,display_name\nwrong,alice\n"))
+		out, err := Load[[]row](strings.NewReader("name\nalice\n"))
 		require.NoError(t, err)
 		require.Equal(t, []row{{Name: "alice"}}, out)
 	})
@@ -366,7 +376,7 @@ func TestLoad_delegatesHeaderResolutionToGocsv(t *testing.T) {
 		require.Equal(t, []row{{Tagged: "alice"}}, out)
 	})
 
-	t.Run("folded collision follows gocsv field order", func(t *testing.T) {
+	t.Run("case-distinct untagged fields do not match", func(t *testing.T) {
 		type row struct {
 			Foo string
 			FOO string
@@ -374,7 +384,7 @@ func TestLoad_delegatesHeaderResolutionToGocsv(t *testing.T) {
 
 		out, err := Load[[]row](strings.NewReader("foo\nalice\n"))
 		require.NoError(t, err)
-		require.Equal(t, []row{{Foo: "alice"}}, out)
+		require.Equal(t, []row{{}}, out)
 	})
 
 	t.Run("duplicate exact tags follow gocsv field order", func(t *testing.T) {
@@ -409,6 +419,36 @@ func TestLoad_delegatesHeaderResolutionToGocsv(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []row{{Partial: "alice"}}, out)
 	})
+}
+
+func TestLoad_taggedParentDottedHeaderUsesExactDescendantCase(t *testing.T) {
+	type row struct {
+		Meta struct {
+			Name string
+		} `csv:"meta"`
+	}
+
+	out, err := Load[[]row](strings.NewReader("meta.name\nalice\n"))
+	require.NoError(t, err)
+	require.Equal(t, []row{{}}, out)
+}
+
+func TestLoad_respectsHostHeaderNormalizer(t *testing.T) {
+	const helperEnvironment = "ETLER_CSV_HEADER_NORMALIZER_HELPER"
+	if os.Getenv(helperEnvironment) == "1" {
+		gocsv.SetHeaderNormalizer(strings.ToLower)
+		defer gocsv.SetHeaderNormalizer(gocsv.DefaultNameNormalizer())
+
+		out, err := Load[[]struct{ Name string }](strings.NewReader("Name\nalice\n"))
+		require.NoError(t, err)
+		require.Equal(t, []struct{ Name string }{{Name: "alice"}}, out)
+
+		return
+	}
+
+	command := exec.Command(os.Args[0], "-test.run=^TestLoad_respectsHostHeaderNormalizer$")
+	command.Env = append(os.Environ(), helperEnvironment+"=1")
+	require.NoError(t, command.Run())
 }
 
 func TestLoad_delegatesTagOptionsToGocsvUnmarshaller(t *testing.T) {
@@ -485,15 +525,15 @@ func TestLoad_gocsvPackageGlobals(t *testing.T) {
 		assert.ErrorIs(t, err, gocsv.ErrDoubleHeaderNames)
 	})
 
-	t.Run("duplicate header flag applies after folding", func(t *testing.T) {
+	t.Run("case-distinct headers are not duplicates", func(t *testing.T) {
 		gocsv.FailIfDoubleHeaderNames = true
 		defer func() {
 			gocsv.FailIfDoubleHeaderNames = false
 		}()
 
 		out, err := Load[[]struct{ Name string }](strings.NewReader("Name,name\nfirst,last\n"))
-		assert.Nil(t, out)
-		assert.ErrorIs(t, err, gocsv.ErrDoubleHeaderNames)
+		require.NoError(t, err)
+		require.Equal(t, []struct{ Name string }{{Name: "first"}}, out)
 	})
 }
 

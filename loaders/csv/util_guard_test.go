@@ -18,7 +18,7 @@ func (value *GuardCustomInt) UnmarshalCSV(string) error {
 	return nil
 }
 
-func TestInspectCSVFields_handlesSupportedFieldShapes(t *testing.T) {
+func TestValidateCSVOutputType_handlesSupportedFieldShapes(t *testing.T) {
 	type Embedded struct {
 		Value int
 	}
@@ -33,22 +33,13 @@ func TestInspectCSVFields_handlesSupportedFieldShapes(t *testing.T) {
 		When time.Time
 	}
 
-	fields, err := inspectCSVFields(reflect.TypeFor[row](), "", true, nil)
+	err := validateCSVOutputType(reflect.TypeFor[row](), nil)
 	require.NoError(t, err)
-
-	keys := make([]string, 0, len(fields))
-	for _, field := range fields {
-		if field.key != "" {
-			keys = append(keys, field.key)
-		}
-	}
-	assert.ElementsMatch(t, []string{"Value", "Parent.Count", "When"}, keys)
 
 	// An unexported field must never be discovered: reflection cannot set it,
 	// so assigning to one would panic. The literal below also proves the field
 	// is real rather than a name the compiler dropped.
 	require.Equal(t, 42, row{hidden: 42}.hidden)
-	assert.NotContains(t, keys, "hidden")
 }
 
 func TestLoad_rejectsCSVSliceExpansion(t *testing.T) {
@@ -65,14 +56,12 @@ func TestLoad_rejectsCSVSliceExpansion(t *testing.T) {
 	assert.ErrorContains(t, err, "Items")
 }
 
-func TestInspectCSVFields_rejectsCycles(t *testing.T) {
-	fields, err := inspectCSVFields(reflect.TypeFor[PointerCycle](), "", true, nil)
-	assert.Nil(t, fields)
+func TestValidateCSVOutputType_rejectsCycles(t *testing.T) {
+	err := validateCSVOutputType(reflect.TypeFor[PointerCycle](), nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cyclic CSV output type")
 
-	fields, err = inspectCSVFields(reflect.TypeFor[SliceCycle](), "", true, nil)
-	assert.Nil(t, fields)
+	err = validateCSVOutputType(reflect.TypeFor[SliceCycle](), nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cyclic CSV output type")
 }
