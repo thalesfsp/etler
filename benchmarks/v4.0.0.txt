@@ -1,27 +1,47 @@
-# etler v4.0.0 — go test -run '^$' -bench . -benchtime 100x -count 3 .
+# etler v4.0.0 — go test -run '^$' -bench . -benchtime 100x -count 6 .
 # macOS 26.6, go version go1.26.5 darwin/arm64
+# Times are the minimum across 6 runs (least-contended sample); allocation
+# and byte counts are deterministic and unaffected by machine load.
 
 goos: darwin
 goarch: arm64
 pkg: github.com/thalesfsp/etler/v4
 cpu: Apple M4 Pro
-BenchmarkLoadersCSV_Load_1kRows-12          	     100	    471572 ns/op	  379103 B/op	   10077 allocs/op
-BenchmarkLoadersCSV_Load_1kRows-12          	     100	    362772 ns/op	  379161 B/op	   10077 allocs/op
-BenchmarkLoadersCSV_Load_1kRows-12          	     100	    351775 ns/op	  379103 B/op	   10077 allocs/op
-BenchmarkStage_Run_1kItems-12               	     100	   2874383 ns/op	 3219180 B/op	   55938 allocs/op
-BenchmarkStage_Run_1kItems-12               	     100	   2937620 ns/op	 3220213 B/op	   56101 allocs/op
-BenchmarkStage_Run_1kItems-12               	     100	   2928925 ns/op	 3210082 B/op	   55886 allocs/op
-BenchmarkStage_Run_1Item-12                 	     100	     11085 ns/op	    8370 B/op	      93 allocs/op
-BenchmarkStage_Run_1Item-12                 	     100	     10608 ns/op	    8335 B/op	      93 allocs/op
-BenchmarkStage_Run_1Item-12                 	     100	     10928 ns/op	    8352 B/op	      93 allocs/op
-BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5699346 ns/op	 6596544 B/op	  111818 allocs/op
-BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5665648 ns/op	 6600154 B/op	  111842 allocs/op
-BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5699285 ns/op	 6597250 B/op	  111657 allocs/op
-BenchmarkProcessor_Run_1kItems-12           	     100	      2747 ns/op	   10894 B/op	      13 allocs/op
-BenchmarkProcessor_Run_1kItems-12           	     100	      2582 ns/op	   11719 B/op	      13 allocs/op
-BenchmarkProcessor_Run_1kItems-12           	     100	      2289 ns/op	   11079 B/op	      13 allocs/op
-BenchmarkConverter_Run_1Item-12             	     100	      2439 ns/op	    3507 B/op	      12 allocs/op
-BenchmarkConverter_Run_1Item-12             	     100	      2119 ns/op	    3492 B/op	      12 allocs/op
-BenchmarkConverter_Run_1Item-12             	     100	      1867 ns/op	    2268 B/op	      11 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    297060 ns/op	  238810 B/op	    8032 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    228892 ns/op	  238808 B/op	    8032 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    205368 ns/op	  238810 B/op	    8032 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    200478 ns/op	  238808 B/op	    8032 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    197238 ns/op	  238810 B/op	    8032 allocs/op
+BenchmarkLoadersCSV_Load_1kRows-12          	     100	    201218 ns/op	  238808 B/op	    8032 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   2832755 ns/op	 3220392 B/op	   55980 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   2981208 ns/op	 3221095 B/op	   56133 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   3024357 ns/op	 3213069 B/op	   55939 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   2985525 ns/op	 3208534 B/op	   55912 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   2968688 ns/op	 3213899 B/op	   56283 allocs/op
+BenchmarkStage_Run_1kItems-12               	     100	   3010061 ns/op	 3212352 B/op	   55913 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     11548 ns/op	    7960 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     10534 ns/op	    8335 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     11738 ns/op	    8583 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     11212 ns/op	    8336 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     11512 ns/op	    8335 B/op	      93 allocs/op
+BenchmarkStage_Run_1Item-12                 	     100	     10918 ns/op	    8589 B/op	      93 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5672913 ns/op	 6598554 B/op	  111688 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5645682 ns/op	 6603049 B/op	  111709 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5629168 ns/op	 6602140 B/op	  111701 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5651662 ns/op	 6600912 B/op	  111707 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5663119 ns/op	 6592906 B/op	  111656 allocs/op
+BenchmarkPipeline_Run_2Stages_1kItems-12    	     100	   5678682 ns/op	 6599485 B/op	  111992 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2797 ns/op	   11117 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2547 ns/op	   10888 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2628 ns/op	   11927 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2515 ns/op	   10662 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2522 ns/op	   11490 B/op	      13 allocs/op
+BenchmarkProcessor_Run_1kItems-12           	     100	      2658 ns/op	   11081 B/op	      13 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2367 ns/op	    4348 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2369 ns/op	    3489 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2152 ns/op	    3063 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2210 ns/op	    3889 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2246 ns/op	    3075 B/op	      12 allocs/op
+BenchmarkConverter_Run_1Item-12             	     100	      2963 ns/op	    3493 B/op	      12 allocs/op
 PASS
-ok  	github.com/thalesfsp/etler/v4	3.064s
+ok  	github.com/thalesfsp/etler/v4	5.715s

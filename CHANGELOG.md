@@ -86,7 +86,10 @@ brings statement coverage to 99.4%.
   than multiplying once; and a `csv[]` count on a slice is materialised eagerly,
   so an absurd count allocates proportionally, array counts being bounded by the
   array. None of this is reachable from CSV data — it is fixed by the Go type and
-  its tags, and ordinary row types are unaffected. A field whose type implements `MarshalCSV`, `MarshalText`,
+  its tags, and ordinary row types are unaffected.
+
+  Which fields the walk descends into follows gocsv exactly. A field whose type
+  implements `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed. A type implementing only `encoding.TextUnmarshaler` is
   **not** a leaf, because gocsv descends into it. Anonymous struct fields are
@@ -156,22 +159,30 @@ level filter. Span names use string concatenation instead of `fmt.Sprintf`, and
 the CSV loader decodes directly instead of building maps and round-tripping them
 through JSON.
 
-Measured on an Apple M4 Pro, Go 1.26.5, median of three runs of
-`go test -run '^$' -bench . -benchtime 100x -count 3 .`; the raw output is
-committed at [`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the
-`v3.0.3` baseline it is compared against.
+Measured on an Apple M4 Pro, Go 1.26.5. Raw output is committed at
+[`benchmarks/v4.0.0.txt`](benchmarks/v4.0.0.txt) alongside the `v3.0.3` baseline
+it is compared against, and every figure below can be recomputed from those two
+files.
+
+Each time is the **minimum** across the runs in those files, not the median. The
+machine was shared, so the minimum is the least-contended sample and the best
+estimate of uncontended cost; a median would report the contention as if it were
+the code. Memory and allocation counts are deterministic and unaffected by load —
+except in the two concurrent benchmarks, where goroutine scheduling moves the
+allocation count by well under one percent run to run, and the minimum is taken
+there too.
 
 | Benchmark | Time | Memory | Allocations |
 | --- | --- | --- | --- |
-| Pipeline, 2 stages × 1k items | 19.0 → 5.7 ms (−70%) | 30.0 → 6.3 MiB (−79%) | 542k → 112k (−79%) |
-| Stage, 1k items | 9.7 → 2.9 ms (−70%) | 14.9 → 3.1 MiB (−79%) | 271k → 56k (−79%) |
-| Stage, single item | 145 → 10.9 µs (−92%) | 68 → 8 KiB (−88%) | 762 → 93 (−88%) |
-| Processor, 1k items | 71.6 → 2.6 µs (−96%) | 44 → 11 KiB (−75%) | 236 → 13 (−94%) |
-| Converter, single call | 58.5 → 2.1 µs (−96%) | 36 → 3 KiB (−90%) | 235 → 12 (−95%) |
-| CSV loader, 1k rows | 1.09 → 0.36 ms (−67%) | 802 → 370 KiB (−54%) | 18.9k → 10.1k (−47%) |
+| Pipeline, 2 stages × 1k items | 19.0 → 5.6 ms (−70%) | 30.0 → 6.3 MiB (−79%) | 542k → 112k (−79%) |
+| Stage, 1k items | 9.6 → 2.8 ms (−71%) | 14.9 → 3.1 MiB (−80%) | 271k → 56k (−79%) |
+| Stage, single item | 144 → 10.5 µs (−93%) | 67 → 8 KiB (−88%) | 761 → 93 (−88%) |
+| Processor, 1k items | 68.9 → 2.5 µs (−96%) | 44 → 10 KiB (−76%) | 236 → 13 (−94%) |
+| Converter, single call | 55.2 → 2.2 µs (−96%) | 35 → 3 KiB (−91%) | 235 → 12 (−95%) |
+| CSV loader, 1k rows | 1.08 → 0.20 ms (−82%) | 802 → 233 KiB (−71%) | 18.9k → 8.0k (−57%) |
 
-Every figure above is the median of the three runs in the committed files, and
-can be recomputed from them.
+The CSV loader improved further after the table was first written, as the
+rewrites removed work from the decode path: allocations fell from 10.1k to 8.0k.
 
 The logging guard does not remove status, counter, progress, or duration writes
 from the normal internal run paths. The exported
