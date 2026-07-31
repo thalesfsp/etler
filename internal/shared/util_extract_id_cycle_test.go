@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,16 @@ func TestExtractID_interfaceFieldCyclesReturnEmpty(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 
-			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestExtractID_interfaceFieldCyclesReturnEmpty$")
+			childArgs := []string{"-test.run=^TestExtractID_interfaceFieldCyclesReturnEmpty$"}
+			for _, arg := range os.Args {
+				if strings.HasPrefix(arg, "-test.gocoverdir=") {
+					childArgs = append(childArgs, arg)
+
+					break
+				}
+			}
+
+			cmd := exec.CommandContext(ctx, os.Args[0], childArgs...)
 			cmd.Env = append(
 				os.Environ(),
 				extractIDInterfaceCycleChildCase+"="+childCase,
@@ -106,4 +116,91 @@ func TestExtractID_pointerCycleBehaviorIsUnchanged(t *testing.T) {
 	value.ID = value
 
 	assert.Empty(t, ExtractID(value, ""))
+}
+
+//////
+// Pointer aliases across ExtractID sibling branches.
+//////
+
+func TestExtractID_pointerAliasResolvesRegardlessOfSiblingOrder(t *testing.T) {
+	type Account struct {
+		ID string
+	}
+
+	type Owner struct {
+		ID *Account
+	}
+
+	type Ref struct {
+		*Account
+	}
+
+	type Record struct {
+		Owner
+		Ref
+	}
+
+	type RecordReversed struct {
+		Ref
+		Owner
+	}
+
+	account := &Account{ID: "acct-42"}
+	recordID := ExtractID(Record{Owner: Owner{ID: account}, Ref: Ref{Account: account}}, "")
+	reversedID := ExtractID(RecordReversed{Ref: Ref{Account: account}, Owner: Owner{ID: account}}, "")
+
+	assert.Equal(t, "acct-42", recordID)
+	assert.Equal(t, recordID, reversedID)
+}
+
+func TestExtractID_distinctPointersKeepSiblingPrecedence(t *testing.T) {
+	type Account struct {
+		ID string
+	}
+
+	type Owner struct {
+		ID *Account
+	}
+
+	type Ref struct {
+		*Account
+	}
+
+	type Record struct {
+		Owner
+		Ref
+	}
+
+	ownerAccount := &Account{ID: "acct-A"}
+	refAccount := &Account{ID: "acct-B"}
+	record := Record{Owner: Owner{ID: ownerAccount}, Ref: Ref{Account: refAccount}}
+
+	assert.Equal(t, "acct-B", ExtractID(record, ""))
+}
+
+func TestExtractID_unsupportedBranchDoesNotBlockLaterSibling(t *testing.T) {
+	type Key struct {
+		ExternalID string
+	}
+
+	type Unsupported struct {
+		ExternalID *Key
+	}
+
+	type Reachable struct {
+		*Key
+	}
+
+	type Record struct {
+		Unsupported
+		Reachable
+	}
+
+	key := &Key{ExternalID: "reachable"}
+	record := Record{
+		Unsupported: Unsupported{ExternalID: key},
+		Reachable:   Reachable{Key: key},
+	}
+
+	assert.Equal(t, "reachable", ExtractID(record, "ExternalID"))
 }

@@ -8,6 +8,31 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+//////
+// Nil detection.
+//////
+
+func TestIsNil(t *testing.T) {
+	var nilChannel chan int
+	var nilFunction func()
+	var nilMap map[string]int
+	var nilPointer *int
+	var nilSlice []int
+
+	assert.True(t, IsNil(nil))
+	assert.True(t, IsNil(nilChannel))
+	assert.True(t, IsNil(nilFunction))
+	assert.True(t, IsNil(nilMap))
+	assert.True(t, IsNil(nilPointer))
+	assert.True(t, IsNil(nilSlice))
+	assert.False(t, IsNil(0))
+	assert.False(t, IsNil(new(int)))
+}
+
+//////
+// ExtractID value handling.
+//////
+
 func TestExtractIDValue_dereferencesPointersAndInterfaces(t *testing.T) {
 	value := 42
 	pointer := &value
