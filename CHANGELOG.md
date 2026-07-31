@@ -75,14 +75,18 @@ brings statement coverage to 99.4%.
   stack overflow or memory exhaustion, and neither is recoverable.
   The walk is a deliberate *superset* of gocsv's own traversal — it may reject a
   type gocsv could technically load, but it can never miss a cycle that kills the
-  process. Two things it does not bound, both driven by the type's own tags
-  rather than by input data. A `csv[]` count on a slice: gocsv materialises that
-  many entries eagerly, so an absurd count exhausts memory (array counts are
-  bounded by the array). And the number of names a field carries: gocsv builds
-  the cartesian product of a nested field's names with its parents', so several
-  comma-separated names repeated down several levels of nesting allocates their
-  product — six names at six levels exhausts a gigabyte. One name per field costs
-  nothing. A field whose type implements `MarshalCSV`, `MarshalText`,
+  process. It does not bound how much work gocsv then does on an acyclic type,
+  and cannot: etler's check memoises and accepts a wide or deep row type
+  instantly, while gocsv's own field walk does not memoise and re-expands the
+  type along every distinct path, so cost grows exponentially with nesting depth.
+  Measured through `Load` with one data row: nineteen levels of two-way nesting,
+  one name per field, produced over half a million columns; two comma-separated
+  names at four levels took 7 ms and at five exhausted memory in about 300 ms,
+  because gocsv folds the growing name set back into itself at each level rather
+  than multiplying once; and a `csv[]` count on a slice is materialised eagerly,
+  so an absurd count allocates proportionally, array counts being bounded by the
+  array. None of this is reachable from CSV data — it is fixed by the Go type and
+  its tags, and ordinary row types are unaffected. A field whose type implements `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed. A type implementing only `encoding.TextUnmarshaler` is
   **not** a leaf, because gocsv descends into it. Anonymous struct fields are
@@ -238,13 +242,12 @@ removed, as listed under breaking changes.
   be removed, so every rejected construction permanently leaked a registry entry
   under that entity name, and a later valid entity with the same name inherited
   the leaked objects — a retry loop over a bad config grew the registry without
-  bound. All five entities now validate before minting metrics, across twelve
+  bound. All five entities now validate before minting metrics, on every
   rejection path but one: an empty required collection, a nil or typed-nil
   element, a nil converter, a nil function, a nil option, and a blank name. The
-  remaining case is not preflightable:
-  an option that itself returns a nil or structurally invalid entity can only be
-  detected by executing it, which requires the entity — and its metrics — to
-  already exist.
+  remaining case is not preflightable — an option that itself returns a nil or
+  structurally invalid entity can only be detected by executing it, which
+  requires the entity, and its metrics, to already exist.
 - **`OnFinished` and `Async` were unsynchronised.** Their getters and setters
   read and wrote the field with no synchronisation (a data race), and `Run` read
   the callback twice, so a `SetOnFinished(nil)` landing between the nil check

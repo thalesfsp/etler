@@ -217,14 +217,27 @@ Then make each applicable migration below:
 
   Cycle rejection walks a deliberate *superset* of gocsv's own traversal: it may
   reject a type gocsv could technically load, but it can never miss a cycle that
-  kills the process. Two things it does not bound, both driven by your own tags
-  rather than by input data. A `csv[]` count on a slice: gocsv materialises that
-  many entries eagerly, so an absurd count exhausts memory (array counts are
-  bounded by the array). And the number of names a field carries: gocsv builds
-  the cartesian product of a nested field's names with its parents', so several
-  comma-separated names repeated down several levels of nesting allocates their
-  product — six names at six levels exhausts a gigabyte. One name per field, the
-  ordinary case, costs nothing. A field type implementing `MarshalCSV`, `MarshalText`,
+  kills the process.
+
+  **It does not bound how much work gocsv then does on an acyclic type, and
+  cannot.** etler's check memoises, so it accepts a wide or deep row type
+  instantly; gocsv's own field walk does not memoise, so it re-expands the type
+  along every distinct path. Cost grows with the number of paths, which is
+  exponential in nesting depth. Measured through `Load`, all with a single data
+  row:
+
+  - Nesting alone, one name per field, each struct branching into two: nineteen
+    levels produced over half a million columns.
+  - Several comma-separated names compound far faster, because gocsv folds the
+    growing name set back into itself at each level rather than multiplying once.
+    Two names at four levels takes 7 ms; two names at *five* exhausts memory in
+    about 300 ms.
+  - A `csv[]` count on a slice is materialised eagerly, so an absurd count
+    allocates proportionally. Array counts are bounded by the array.
+
+  None of this is reachable from CSV *data* — it is determined entirely by the Go
+  type and its tags. Ordinary row types are unaffected. If you generate row types,
+  keep them shallow and give each field one name. A field type implementing `MarshalCSV`, `MarshalText`,
   `UnmarshalCSV`, or `UnmarshalCSVWithFields` is a leaf, and only one pointer
   level is followed, so `**T` is a leaf. A type implementing only
   `encoding.TextUnmarshaler` is **not** a leaf, because gocsv descends into it.
