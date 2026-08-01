@@ -7,19 +7,19 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/thalesfsp/etler/v3/loader"
+	"github.com/thalesfsp/etler/v4/loader"
 )
 
 // Test struct.
 type Test struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID   string `csv:"id"`
+	Name string `csv:"name"`
 }
 
 func TestNew(t *testing.T) {
 	csvContent := `id,name
-	1,John
-	2,Peter`
+1,John
+2,Peter`
 
 	buf := new(strings.Builder)
 

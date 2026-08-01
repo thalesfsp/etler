@@ -3,12 +3,15 @@ package processor
 import (
 	"context"
 	"expvar"
+	"reflect"
+	"sync"
 	"time"
 
-	"github.com/thalesfsp/etler/v3/internal/customapm"
-	"github.com/thalesfsp/etler/v3/internal/logging"
-	"github.com/thalesfsp/etler/v3/internal/metrics"
-	"github.com/thalesfsp/etler/v3/internal/shared"
+	"github.com/thalesfsp/customerror/v2"
+	"github.com/thalesfsp/etler/v4/internal/customapm"
+	"github.com/thalesfsp/etler/v4/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/metrics"
+	"github.com/thalesfsp/etler/v4/internal/shared"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/level"
@@ -19,37 +22,38 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies processor entities.
 const Type = "processor"
 
-// Transform is a function that transforms (`processingData`) into
-// (`processingData`), returning any errors that occurred during processing.
+// Transform transforms `processingData`, returning the processed data and any
+// error. It must not mutate its input slice or pointed-to values; stages reuse
+// results and async processors receive only a shallow copy.
 type Transform[ProcessedData any] func(ctx context.Context, processingData []ProcessedData) (processedOut []ProcessedData, err error)
 
-// Processor definition.
+// Processor wraps a slice transform with lifecycle observability.
 type Processor[ProcessingData any] struct {
-	// Transform function.
+	// Func transforms a slice without mutating its input or pointed-to values.
 	Func Transform[ProcessingData] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records processor lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the processor.
-	Name string `json:"name"`
+	// Name identifies the processor.
+	Name string `json:"name" validate:"required"`
 
-	// Description of the processor.
+	// Description describes the processor.
 	Description string `json:"description"`
 
-	// Async if set will run the processor in a go routine.
+	// async tells a stage to run this processor in a goroutine.
 	//
 	// WARN: The output of the processing will not be forwarded!
-	Async bool `default:"false" json:"async"`
+	async bool `default:"false"`
 
-	// OnFinished is the function that is called when a processor finishes its
-	// execution.
-	OnFinished OnFinished[ProcessingData] `json:"-"`
+	// onFinished is called after a processor succeeds.
+	onFinished OnFinished[ProcessingData] `json:"-"`
 
-	// Metrics.
+	// Lifecycle metrics. CounterInterrupted counts paused runs whose wait ends
+	// because their context is cancelled or reaches its deadline.
 	CounterCreated     *expvar.Int `json:"counterCreated"`
 	CounterDone        *expvar.Int `json:"counterDone"`
 	CounterFailed      *expvar.Int `json:"counterFailed"`
@@ -59,6 +63,9 @@ type Processor[ProcessingData any] struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	Duration  *expvar.Int    `json:"duration"`
 	Status    *expvar.String `json:"status"`
+
+	// mu guards async and onFinished.
+	mu sync.RWMutex
 }
 
 //////
@@ -95,7 +102,8 @@ func (p *Processor[ProcessingData]) GetCounterFailed() *expvar.Int {
 	return p.CounterFailed
 }
 
-// GetCounterInterrupted returns the `CounterInterrupted` metric.
+// GetCounterInterrupted returns the counter for paused runs interrupted by
+// context cancellation or deadline.
 func (p *Processor[ProcessingData]) GetCounterInterrupted() *expvar.Int {
 	return p.CounterInterrupted
 }
@@ -112,12 +120,18 @@ func (p *Processor[ProcessingData]) GetStatus() *expvar.String {
 
 // GetOnFinished returns the `OnFinished` function.
 func (p *Processor[ProcessingData]) GetOnFinished() OnFinished[ProcessingData] {
-	return p.OnFinished
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return p.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (p *Processor[ProcessingData]) SetOnFinished(onFinished OnFinished[ProcessingData]) {
-	p.OnFinished = onFinished
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.onFinished = onFinished
 }
 
 // GetType returns the entity type.
@@ -125,48 +139,62 @@ func (p *Processor[ProcessingData]) GetType() string {
 	return Type
 }
 
-// GetCreatedAt returns the created at time.
+// GetCreatedAt returns when the processor was constructed.
 func (p *Processor[ProcessingData]) GetCreatedAt() time.Time {
 	return p.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the most recent successful transform duration in
+// milliseconds. A failed transform does not replace it.
 func (p *Processor[ProcessingData]) GetDuration() *expvar.Int {
 	return p.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns selected processor metrics as strings.
 func (p *Processor[ProcessingData]) GetMetrics() map[string]string {
 	return map[string]string{
-		"createdAt":      p.GetCreatedAt().String(),
-		"counterCreated": p.GetCounterCreated().String(),
-		"counterDone":    p.GetCounterDone().String(),
-		"counterFailed":  p.GetCounterFailed().String(),
-		"counterRunning": p.GetCounterRunning().String(),
-		"duration":       p.GetDuration().String(),
-		"status":         p.GetStatus().String(),
+		"createdAt":          p.GetCreatedAt().String(),
+		"counterCreated":     p.GetCounterCreated().String(),
+		"counterDone":        p.GetCounterDone().String(),
+		"counterFailed":      p.GetCounterFailed().String(),
+		"counterInterrupted": p.GetCounterInterrupted().String(),
+		"counterRunning":     p.GetCounterRunning().String(),
+		"duration":           p.GetDuration().String(),
+		"status":             p.GetStatus().String(),
 	}
 }
 
-// SetAsync if set will run the processor in a go routine.
+// SetAsync marks the processor for goroutine execution by a stage. Async
+// scheduling does not change Run's lifecycle status or counters. Async
+// processors receive a shallow copy, so transforms must not mutate input or
+// pointed-to values.
 //
 // WARN: The output of the processing will not be forwarded!
 func (p *Processor[ProcessingData]) SetAsync(async bool) {
-	p.Async = async
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.async = async
 }
 
-// GetAsync returns if the processor is running in a go routine.
+// GetAsync reports whether a stage should run the processor in a goroutine.
 func (p *Processor[ProcessingData]) GetAsync() bool {
-	return p.Async
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return p.async
 }
 
-// Run the transform function.
+// Run waits if its context carries a paused pipeline controller, then invokes
+// the transform and completion callback. A processor running without such a
+// controller does not pause. Context termination while waiting is recorded as
+// an interruption; transform errors are recorded as failures.
 func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []ProcessingData) ([]ProcessingData, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		p.GetName(),
@@ -174,11 +202,13 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		p.GetLogger(),
 		p.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
 
 	p.GetStatus().Set(status.Runnning.String())
 
-	p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	if logging.Admits(p.GetLogger(), level.Trace) {
+		p.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	}
 
 	// Store as reference to be used in the OnFinished function.
 	originalProcessingData := processingData
@@ -198,7 +228,9 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 		p.GetStatus().Set(status.Paused.String())
 
 		// Notifiy user.
-		p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
+		if logging.Admits(p.GetLogger(), level.Trace) {
+			p.GetLogger().Tracelnf("Processor %s is paused. Waiting to be resumed...", p.GetName())
+		}
 
 		// Blocks until resumed, or until the context is done.
 		if err := pc.Wait(tracedContext); err != nil {
@@ -206,14 +238,17 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 			// Observability: tracing, metrics, status, logging, etc.
 			//////
 
-			return nil, shared.OnErrorHandler(
+			p.GetStatus().Set(status.Interrupted.String())
+
+			return nil, customapm.TraceError(
 				tracedContext,
-				p,
+				customerror.NewFailedToError(
+					"process",
+					customerror.WithError(err),
+					customerror.WithField(Type, p.GetName()),
+				),
 				p.GetLogger(),
-				err,
-				"process",
-				Type,
-				p.GetName(),
+				p.GetCounterInterrupted(),
 			)
 		}
 
@@ -251,9 +286,13 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
+	// Set duration.
+	p.GetDuration().Set(time.Since(now).Milliseconds())
+
 	// Run onEvent callback with the original input and the processed output.
-	if p.GetOnFinished() != nil {
-		p.GetOnFinished()(ctx, p, originalProcessingData, o)
+	onFinished := p.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, p, originalProcessingData, o)
 	}
 
 	// Update status.
@@ -262,21 +301,20 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 	// Increment the done counter.
 	p.GetCounterDone().Add(1)
 
-	// Set duration.
-	p.GetDuration().Set(time.Since(now).Milliseconds())
-
 	// Print the stage's status.
-	p.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", p.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", p.GetCounterCreated().String()),
-		sypl.WithField("counterDone", p.GetCounterDone().String()),
-		sypl.WithField("counterFailed", p.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", p.GetCounterRunning().String()),
-		sypl.WithField("duration", p.GetDuration().String()),
-		sypl.WithField("status", p.GetStatus().String()),
-	)
+	if logging.Admits(p.GetLogger(), level.Debug) {
+		p.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", p.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", p.GetCounterCreated().String()),
+			sypl.WithField("counterDone", p.GetCounterDone().String()),
+			sypl.WithField("counterFailed", p.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", p.GetCounterRunning().String()),
+			sypl.WithField("duration", p.GetDuration().String()),
+			sypl.WithField("status", p.GetStatus().String()),
+		)
+	}
 
 	return o, nil
 }
@@ -285,37 +323,80 @@ func (p *Processor[ProcessingData]) Run(ctx context.Context, processingData []Pr
 // Factory.
 //////
 
-// New returns a new processor.
+// New creates a processor. It applies options in order, retains each returned
+// implementation, and then validates the result. Nil options and results are
+// rejected. An option must return a usable implementation; returning one whose
+// embedded interface is nil will panic when it is used, as it would anywhere
+// in Go.
+// Structural validation runs before lifecycle metric getters; the final
+// implementation must expose non-nil lifecycle metrics. The transform must not
+// mutate its input slice or pointed-to values.
 func New[ProcessingData any](
 	name, description string,
 	fn Transform[ProcessingData],
 	opts ...Func[ProcessingData],
 ) (IProcessor[ProcessingData], error) {
-	p := &Processor[ProcessingData]{
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("processor option")
+		}
+	}
+
+	base := &Processor[ProcessingData]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 
 		CreatedAt:   time.Now(),
 		Name:        name,
 		Description: description,
-
-		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
-		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
-		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
-		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-
-		CounterInterrupted: metrics.NewIntWithPattern(Type, name, status.Interrupted),
-		Duration:           metrics.NewIntWithPattern(Type, name, "duration"),
-		Status:             metrics.NewStringWithPattern(Type, name, status.Name),
 	}
+
+	// Validate caller-supplied fields before constructing metrics because
+	// published expvars cannot be removed.
+	if err := validation.Validate(base); err != nil {
+		return nil, err
+	}
+
+	base.CounterCreated = metrics.NewIntWithPattern(Type, name, status.Created)
+	base.CounterDone = metrics.NewIntWithPattern(Type, name, status.Done)
+	base.CounterFailed = metrics.NewIntWithPattern(Type, name, status.Failed)
+	base.CounterRunning = metrics.NewIntWithPattern(Type, name, status.Runnning)
+
+	base.CounterInterrupted = metrics.NewIntWithPattern(Type, name, status.Interrupted)
+	base.Duration = metrics.NewIntWithPattern(Type, name, "duration")
+	base.Status = metrics.NewStringWithPattern(Type, name, status.Name)
+
+	var p IProcessor[ProcessingData] = base
 
 	// Apply options.
 	for _, opt := range opts {
-		opt(p)
+		p = opt(p)
+		if p == nil {
+			return nil, customerror.NewRequiredError("processor option result")
+		}
+		value := reflect.ValueOf(p)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return nil, customerror.NewRequiredError("processor option result")
+			}
+		}
 	}
 
 	// Validation.
 	if err := validation.Validate(p); err != nil {
+		return nil, err
+	}
+
+	if err := validateOptionMetrics(p); err != nil {
 		return nil, err
 	}
 
@@ -330,4 +411,27 @@ func New[ProcessingData any](
 	p.GetLogger().PrintlnWithOptions(level.Trace, status.Created.String())
 
 	return p, nil
+}
+
+// validateOptionMetrics ensures options retain the metrics dereferenced by
+// processor lifecycle observability.
+func validateOptionMetrics[ProcessingData any](p IProcessor[ProcessingData]) error {
+	switch {
+	case p.GetStatus() == nil:
+		return customerror.NewRequiredError("processor status metric")
+	case p.GetCounterCreated() == nil:
+		return customerror.NewRequiredError("processor created counter")
+	case p.GetCounterRunning() == nil:
+		return customerror.NewRequiredError("processor running counter")
+	case p.GetCounterFailed() == nil:
+		return customerror.NewRequiredError("processor failed counter")
+	case p.GetCounterDone() == nil:
+		return customerror.NewRequiredError("processor done counter")
+	case p.GetCounterInterrupted() == nil:
+		return customerror.NewRequiredError("processor interrupted counter")
+	case p.GetDuration() == nil:
+		return customerror.NewRequiredError("processor duration metric")
+	default:
+		return nil
+	}
 }

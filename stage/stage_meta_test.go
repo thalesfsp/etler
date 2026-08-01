@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v3/internal/metrics"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/internal/metrics"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/task"
 )
 
 // Metadata getters + WithOnFinished option.
@@ -46,9 +46,16 @@ func TestStage_metadataAndOnFinishedOption(t *testing.T) {
 		called = true
 	})(stg)
 
+	// The callback field is intentionally unexported; accessors are the
+	// supported mutation path and therefore cannot bypass its mutex.
+	assert.NotNil(t, stg.GetOnFinished())
+
 	_, err = stg.Run(context.Background(), task.MustNew[int, int]([]int{1}))
 	require.NoError(t, err)
 	assert.True(t, called, "the OnFinished set via option must run")
+
+	stg.SetOnFinished(nil)
+	assert.Nil(t, stg.GetOnFinished())
 }
 
 // Edge case: the progress-percent guard for a bare stage without processors

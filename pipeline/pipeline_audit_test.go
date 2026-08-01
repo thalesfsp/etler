@@ -3,17 +3,249 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v3/converter"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/stage"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/converter"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/stage"
+	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/status"
 )
+
+func TestPipeline_concurrentRunsAreSerialized(t *testing.T) {
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 2)
+
+	var (
+		inFlight    atomic.Int32
+		maxInFlight atomic.Int32
+	)
+
+	blocking, err := processor.New(
+		"serialized-run-audit-processor",
+		"blocks concurrent pipeline runs",
+		func(_ context.Context, processingData []int) ([]int, error) {
+			current := inFlight.Add(1)
+			defer inFlight.Add(-1)
+
+			for {
+				maximum := maxInFlight.Load()
+				if current <= maximum || maxInFlight.CompareAndSwap(maximum, current) {
+					break
+				}
+			}
+
+			entered <- struct{}{}
+			<-gate
+
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	blockingStage, err := stage.New(
+		"serialized-run-audit-stage",
+		"contains a blocking processor",
+		converter.MustDefault(
+			func(_ context.Context, in int) (int, error) {
+				return in, nil
+			},
+		),
+		blocking,
+	)
+	require.NoError(t, err)
+
+	p, err := New(
+		"serialized-run-audit",
+		"serializes concurrent runs",
+		false,
+		blockingStage,
+	)
+	require.NoError(t, err)
+
+	start := make(chan struct{})
+	runs := make(chan error, 2)
+
+	for range 2 {
+		go func() {
+			<-start
+
+			_, runErr := p.Run(context.Background(), []int{1})
+			runs <- runErr
+		}()
+	}
+
+	close(start)
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Run did not enter the blocking processor")
+	}
+
+	assert.Never(
+		t,
+		func() bool {
+			return maxInFlight.Load() > 1
+		},
+		100*time.Millisecond,
+		time.Millisecond,
+		"concurrent Run calls entered the processor together",
+	)
+
+	close(gate)
+
+	for range 2 {
+		select {
+		case runErr := <-runs:
+			require.NoError(t, runErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("serialized Run did not complete after the gate opened")
+		}
+	}
+
+	assert.Equal(t, int32(1), maxInFlight.Load())
+}
+
+func TestPipeline_concurrentRunPauseAndStatusAccess(t *testing.T) {
+	const (
+		iterations = 25
+		workers    = 4
+	)
+
+	pipelineValue, err := New(
+		"concurrent-run-pause-status-audit",
+		"concurrent run pause and status access",
+		false,
+		newIdentityStage(t, "concurrent-run-pause-status-audit-stage"),
+	)
+	require.NoError(t, err)
+
+	p := pipelineValue.(*Pipeline[int, int])
+	start := make(chan struct{})
+
+	legalLifecycleStatus := func(value string) bool {
+		switch status.Status(value) {
+		case status.Created, status.Runnning, status.Done, status.Failed:
+			return true
+		default:
+			return false
+		}
+	}
+
+	var wg sync.WaitGroup
+
+	startWorker := func(work func()) {
+		t.Helper()
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Errorf("concurrent pipeline access panicked: %v", recovered)
+				}
+			}()
+
+			<-start
+			work()
+		}()
+	}
+
+	for worker := range workers {
+		startWorker(func() {
+			for iteration := range iterations {
+				_, runErr := p.Run(
+					context.Background(),
+					[]int{worker*iterations + iteration},
+				)
+				if runErr != nil {
+					t.Errorf("Run failed during concurrent access: %v", runErr)
+				}
+			}
+		})
+
+		startWorker(func() {
+			defer p.SetPause(false)
+
+			for iteration := range iterations {
+				p.SetPause((worker+iteration)%2 == 0)
+			}
+		})
+
+		startWorker(func() {
+			for range iterations {
+				paused := p.GetPaused()
+				if paused != status.Paused && paused != status.Runnning {
+					t.Errorf("GetPaused returned illegal value %q", paused)
+				}
+
+				lifecycle := p.GetStatus().Value()
+				if !legalLifecycleStatus(lifecycle) {
+					t.Errorf("GetStatus returned illegal lifecycle value %q", lifecycle)
+				}
+				if lifecycle == status.Paused.String() {
+					t.Errorf("GetStatus returned pause state %q", lifecycle)
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+
+	p.SetPause(false)
+	assert.Equal(t, status.Runnning, p.GetPaused())
+	assert.True(t, legalLifecycleStatus(p.GetStatus().Value()))
+	assert.NotEqual(t, status.Paused.String(), p.GetStatus().Value())
+}
+
+func TestPipeline_onFinishedCanRunPipelineAgain(t *testing.T) {
+	pipelineValue, err := New(
+		"on-finished-reentrant-run-audit",
+		"on-finished can run the pipeline again",
+		false,
+		newIdentityStage(t, "on-finished-reentrant-run-audit-stage"),
+	)
+	require.NoError(t, err)
+
+	p := pipelineValue.(*Pipeline[int, int])
+	nestedRun := make(chan error, 1)
+
+	p.SetOnFinished(func(
+		ctx context.Context,
+		pl IPipeline[int, int],
+		_ task.Task[int, int],
+		_ []task.Task[int, int],
+	) {
+		pl.SetOnFinished(nil)
+
+		_, nestedErr := pl.Run(ctx, []int{2})
+		nestedRun <- nestedErr
+	})
+
+	outerRun := make(chan error, 1)
+
+	go func() {
+		_, runErr := p.Run(context.Background(), []int{1})
+		outerRun <- runErr
+	}()
+
+	select {
+	case runErr := <-outerRun:
+		require.NoError(t, runErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnFinished deadlocked while starting a nested Run")
+	}
+
+	require.NoError(t, <-nestedRun)
+}
 
 // newIdentityStage returns a stage with an identity processor and an identity
 // converter, suitable for int-based pipeline tests.
@@ -73,6 +305,20 @@ func newFailingStage(t *testing.T, name string, failWith error) stage.IStage[int
 	return stg
 }
 
+type runSignalingStage struct {
+	stage.IStage[int, int]
+	entered chan<- struct{}
+}
+
+func (s runSignalingStage) Run(
+	ctx context.Context,
+	tsk task.Task[int, int],
+) (task.Task[int, int], error) {
+	s.entered <- struct{}{}
+
+	return s.IStage.Run(ctx, tsk)
+}
+
 // Bad path: a stage failure in CONCURRENT mode must surface the underlying
 // cause to the caller, not a generic error with the cause dropped.
 func TestPipeline_concurrent_stageErrorCausePropagated(t *testing.T) {
@@ -117,24 +363,256 @@ func TestPipeline_sequential_stageErrorCausePropagated(t *testing.T) {
 	assert.GreaterOrEqual(t, p.GetCounterFailed().Value(), int64(1))
 }
 
-// Bug: SetPause(true) must actually pause the pipeline. The original
-// implementation fell through and immediately unpaused itself.
-func TestPipeline_SetPause_togglesPausedState(t *testing.T) {
+// Pause state belongs to the controller and must not replace the run's
+// lifecycle status. Repeating either transition is a no-op.
+func TestPipeline_SetPause_changesOnlyControllerStateAndIsIdempotent(t *testing.T) {
 	p, err := New("pause-audit", "pause toggling", false,
 		newIdentityStage(t, "stage-pause-audit"),
 	)
 	require.NoError(t, err)
-
-	// Always leave the global pause flag clean for other tests.
-	defer p.SetPause(false)
+	require.Equal(t, status.Created.String(), p.GetStatus().Value())
 
 	p.SetPause(true)
-	assert.Equal(t, status.Paused, p.GetPaused(), "SetPause(true) must pause")
-	assert.Equal(t, status.Paused.String(), p.GetStatus().Value())
+	require.Equal(t, status.Paused, p.GetPaused(), "SetPause(true) must pause")
+	require.Equal(t, status.Created.String(), p.GetStatus().Value())
+	require.NotEqual(t, status.Paused.String(), p.GetStatus().Value())
+
+	p.SetPause(true)
+	require.Equal(t, status.Paused, p.GetPaused(), "repeated pause must be a no-op")
+	require.Equal(t, status.Created.String(), p.GetStatus().Value())
 
 	p.SetPause(false)
-	assert.Equal(t, status.Runnning, p.GetPaused(), "SetPause(false) must resume")
-	assert.Equal(t, status.Runnning.String(), p.GetStatus().Value())
+	require.Equal(t, status.Runnning, p.GetPaused(), "SetPause(false) must resume")
+	require.Equal(t, status.Created.String(), p.GetStatus().Value())
+
+	p.SetPause(false)
+	assert.Equal(t, status.Runnning, p.GetPaused(), "repeated resume must be a no-op")
+	assert.Equal(t, status.Created.String(), p.GetStatus().Value())
+}
+
+// Pausing and resuming a terminal pipeline changes only its controller state.
+func TestPipeline_SetPause_doesNotChangeTerminalStatus(t *testing.T) {
+	t.Run("done", func(t *testing.T) {
+		p, err := New("pause-done-audit", "done status survives pause", false,
+			newIdentityStage(t, "stage-pause-done-audit"),
+		)
+		require.NoError(t, err)
+
+		_, err = p.Run(context.Background(), []int{1})
+		require.NoError(t, err)
+		require.Equal(t, status.Done.String(), p.GetStatus().Value())
+
+		p.SetPause(true)
+		require.Equal(t, status.Paused, p.GetPaused())
+		require.Equal(t, status.Done.String(), p.GetStatus().Value())
+
+		p.SetPause(false)
+		assert.Equal(t, status.Runnning, p.GetPaused())
+		assert.Equal(t, status.Done.String(), p.GetStatus().Value())
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		boom := errors.New("pause-failed-audit")
+
+		p, err := New("pause-failed-audit", "failed status survives pause", false,
+			newFailingStage(t, "stage-pause-failed-audit", boom),
+		)
+		require.NoError(t, err)
+
+		_, err = p.Run(context.Background(), []int{1})
+		require.ErrorIs(t, err, boom)
+		require.Equal(t, status.Failed.String(), p.GetStatus().Value())
+
+		p.SetPause(true)
+		require.Equal(t, status.Paused, p.GetPaused())
+		require.Equal(t, status.Failed.String(), p.GetStatus().Value())
+
+		p.SetPause(false)
+		assert.Equal(t, status.Runnning, p.GetPaused())
+		assert.Equal(t, status.Failed.String(), p.GetStatus().Value())
+	})
+}
+
+// A run that finishes while its controller is paused publishes its terminal
+// lifecycle status immediately; completing the run does not resume the
+// controller.
+func TestPipeline_runPublishesTerminalStatusWhileControllerPaused(t *testing.T) {
+	tests := []struct {
+		name       string
+		runErr     error
+		wantStatus status.Status
+	}{
+		{
+			name:       "done",
+			wantStatus: status.Done,
+		},
+		{
+			name:       "failed",
+			runErr:     errors.New("repeated-pause-failed"),
+			wantStatus: status.Failed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entered := make(chan struct{})
+			release := make(chan struct{})
+
+			proc, err := processor.New(
+				"repeated-pause-"+tt.name+"-processor",
+				"finishes after the pipeline is paused",
+				func(ctx context.Context, processingData []int) ([]int, error) {
+					close(entered)
+					<-release
+
+					return processingData, tt.runErr
+				},
+			)
+			require.NoError(t, err)
+
+			conv, err := converter.New(
+				"repeated-pause-"+tt.name+"-converter",
+				"identity converter",
+				func(ctx context.Context, in int) (int, error) {
+					return in, nil
+				},
+			)
+			require.NoError(t, err)
+
+			stg, err := stage.New(
+				"repeated-pause-"+tt.name+"-stage",
+				"stage for repeated pause",
+				conv,
+				proc,
+			)
+			require.NoError(t, err)
+
+			p, err := New(
+				"repeated-pause-"+tt.name+"-pipeline",
+				"pipeline for repeated pause",
+				false,
+				stg,
+			)
+			require.NoError(t, err)
+
+			runDone := make(chan error, 1)
+
+			go func() {
+				_, err := p.Run(context.Background(), []int{1})
+				runDone <- err
+			}()
+
+			<-entered
+			require.Equal(t, status.Runnning.String(), p.GetStatus().Value())
+
+			p.SetPause(true)
+			require.Equal(t, status.Paused, p.GetPaused())
+
+			close(release)
+
+			if tt.runErr == nil {
+				require.NoError(t, <-runDone)
+			} else {
+				require.ErrorIs(t, <-runDone, tt.runErr)
+			}
+
+			require.Equal(t, status.Paused, p.GetPaused(),
+				"a completed run must not unpause its controller")
+			assert.Equal(t, tt.wantStatus.String(), p.GetStatus().Value(),
+				"the terminal lifecycle status must be visible without resuming")
+		})
+	}
+}
+
+// Starting a new run while paused must publish running immediately. Resuming
+// must not resurrect the first run's terminal status over the second run.
+func TestPipeline_secondRunReplacesTerminalStatusWhileControllerPaused(t *testing.T) {
+	stageEntered := make(chan struct{})
+	firstProcessorEntered := make(chan struct{})
+	firstRelease := make(chan struct{})
+	secondProcessorEntered := make(chan struct{})
+	secondRelease := make(chan struct{})
+	gates := make(chan struct {
+		entered chan<- struct{}
+		release <-chan struct{}
+	}, 2)
+	gates <- struct {
+		entered chan<- struct{}
+		release <-chan struct{}
+	}{entered: firstProcessorEntered, release: firstRelease}
+	gates <- struct {
+		entered chan<- struct{}
+		release <-chan struct{}
+	}{entered: secondProcessorEntered, release: secondRelease}
+
+	blocking, err := processor.New(
+		"pause-second-run-blocking",
+		"coordinates two runs",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			gate := <-gates
+			gate.entered <- struct{}{}
+			<-gate.release
+
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	stg, err := stage.New(
+		"stage-pause-second-run",
+		"second run pause stage",
+		converter.MustDefault(
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+		),
+		blocking,
+	)
+	require.NoError(t, err)
+
+	p, err := New(
+		"pause-second-run-audit",
+		"second run replaces first status",
+		false,
+		runSignalingStage{IStage: stg, entered: stageEntered},
+	)
+	require.NoError(t, err)
+
+	firstRunDone := make(chan error, 1)
+
+	go func() {
+		_, err := p.Run(context.Background(), []int{1})
+		firstRunDone <- err
+	}()
+
+	<-stageEntered
+	<-firstProcessorEntered
+
+	p.SetPause(true)
+	close(firstRelease)
+	require.NoError(t, <-firstRunDone)
+	require.Equal(t, status.Paused, p.GetPaused())
+
+	secondRunDone := make(chan error, 1)
+
+	go func() {
+		_, err := p.Run(context.Background(), []int{2})
+		secondRunDone <- err
+	}()
+
+	<-stageEntered
+	require.Equal(t, status.Paused, p.GetPaused())
+	require.Equal(t, status.Runnning.String(), p.GetStatus().Value(),
+		"the second run must replace the first run's terminal lifecycle status")
+
+	p.SetPause(false)
+	<-secondProcessorEntered
+	require.Equal(t, status.Runnning.String(), p.GetStatus().Value(),
+		"resume must not resurrect the first run's terminal status")
+
+	close(secondRelease)
+	require.NoError(t, <-secondRunDone)
+	assert.Equal(t, status.Done.String(), p.GetStatus().Value())
 }
 
 // E2E: pausing the pipeline must actually hold processors back until resumed.
@@ -164,8 +642,14 @@ func TestPipeline_pause_holdsProcessing_untilResumed(t *testing.T) {
 		witness,
 	)
 	require.NoError(t, err)
+	stageEntered := make(chan struct{})
 
-	p, err := New("pause-e2e-audit", "pause e2e", false, stg)
+	p, err := New(
+		"pause-e2e-audit",
+		"pause e2e",
+		false,
+		runSignalingStage{IStage: stg, entered: stageEntered},
+	)
 	require.NoError(t, err)
 
 	defer p.SetPause(false)
@@ -179,6 +663,8 @@ func TestPipeline_pause_holdsProcessing_untilResumed(t *testing.T) {
 		done <- err
 	}()
 
+	<-stageEntered
+
 	// While paused, the processor must NOT run.
 	select {
 	case <-ran:
@@ -187,9 +673,9 @@ func TestPipeline_pause_holdsProcessing_untilResumed(t *testing.T) {
 		// Still paused, as expected.
 	}
 
-	// A paused pipeline must REPORT paused, even while Run is in flight.
-	assert.Equal(t, status.Paused.String(), p.GetStatus().Value(),
-		"Run must not flip a paused pipeline's status to running")
+	// The run lifecycle is independent from the paused controller.
+	assert.Equal(t, status.Runnning.String(), p.GetStatus().Value(),
+		"Run must publish running even while the controller is paused")
 
 	p.SetPause(false)
 
@@ -239,6 +725,8 @@ func TestPipeline_nilAndEmptyInput(t *testing.T) {
 	out, err := p.Run(ctx, nil)
 	assert.Nil(t, out)
 	assert.Error(t, err, "nil input must be rejected")
+	assert.Equal(t, status.Failed.String(), p.GetStatus().Value(),
+		"a nil-input failure must update pipeline status")
 
 	out, err = p.Run(ctx, []int{})
 	require.NoError(t, err, "empty (non-nil) input is a valid, empty run")
@@ -273,6 +761,62 @@ func TestPipeline_reuse_progressDoesNotExceed100Percent(t *testing.T) {
 	assert.Equal(t, int64(1), p.GetProgress().Value(),
 		"progress must be relative to the current run")
 	assert.Equal(t, "100%", p.GetProgressPercent().Value())
+}
+
+// Regression: every run replaces the duration metric, including failed runs.
+func TestPipeline_failedRun_replacesPreviousDuration(t *testing.T) {
+	boom := errors.New("boom-pipeline-duration-audit")
+
+	runs := 0
+
+	slowThenFail, err := processor.New(
+		"slow-then-fail-pipeline-duration-audit",
+		"succeeds slowly, then fails fast",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			runs++
+
+			if runs == 1 {
+				time.Sleep(200 * time.Millisecond)
+
+				return processingData, nil
+			}
+
+			return nil, boom
+		},
+	)
+	require.NoError(t, err)
+
+	stg, err := stage.New(
+		"stage-pipeline-duration-audit",
+		"duration stage",
+		converter.MustDefault(
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+		),
+		slowThenFail,
+	)
+	require.NoError(t, err)
+
+	p, err := New(
+		"pipeline-duration-audit",
+		"failed run replaces duration",
+		false,
+		stg,
+	)
+	require.NoError(t, err)
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.NoError(t, err)
+
+	successfulDuration := p.GetDuration().Value()
+	require.Positive(t, successfulDuration)
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.ErrorIs(t, err, boom)
+
+	assert.Less(t, p.GetDuration().Value(), successfulDuration,
+		"the failed pipeline run must replace the previous successful duration")
 }
 
 // Concurrency: two pipelines running at the same time must not interfere with

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/dal/v2/memory"
-	"github.com/thalesfsp/etler/v3/converter"
+	"github.com/thalesfsp/etler/v4/converter"
 	"github.com/thalesfsp/params/v2/retrieve"
 )
 
@@ -37,9 +37,11 @@ func TestNew(t *testing.T) {
 	csvConverter, err := New(
 		memoryStorage,
 		"test",
-		converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[[]Test, string], originalIn []Test, convertedOut string) {
-			buf.WriteString(c.GetName() + " finished")
-		}),
+		WithConverterOptions(
+			converter.WithOnFinished(func(ctx context.Context, c converter.IConverter[[]Test, string], originalIn []Test, convertedOut string) {
+				buf.WriteString(c.GetName() + " finished")
+			}),
+		),
 	)
 	assert.NoError(t, err)
 

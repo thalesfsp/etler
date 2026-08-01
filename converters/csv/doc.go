@@ -1,3 +1,5 @@
-// Package csv contains the CSV converter which allows to concurrently
-// store the processed data into a CSV file.
+// Package csv converts slices of values into CSV text. Converter construction
+// rejects cyclic row types before gocsv can recurse until the process dies. The
+// marshal boundary turns other gocsv panics, including panics from caller
+// MarshalCSV methods, into errors. Valid csv[] expansion remains supported.
 package csv

@@ -5,14 +5,14 @@ import (
 	"errors"
 	"expvar"
 
-	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/fields"
 	"github.com/thalesfsp/sypl/v2/level"
 	"go.elastic.co/apm"
 )
 
-// Outcome is the outcome of a span. It can be either success or failure.
+// Outcome represents an APM span outcome.
 type Outcome string
 
 const (
@@ -23,13 +23,14 @@ const (
 	Success Outcome = "success"
 )
 
+// String returns the outcome value.
 func (o Outcome) String() string {
 	return string(o)
 }
 
-// TraceError is a helper function to trace an error. It will log the error
-// with the APM fields, and tell APM that it was an error. It will also set
-// the span outcome to failure.
+// TraceError increments metric when non-nil, marks the current span failed,
+// unwraps a single-error chain before capture and optional logging, and returns
+// the original err.
 func TraceError(
 	ctx context.Context,
 	err error,

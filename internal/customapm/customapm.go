@@ -3,9 +3,8 @@ package customapm
 import (
 	"context"
 	"expvar"
-	"fmt"
 
-	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/fields"
@@ -13,55 +12,46 @@ import (
 	"go.elastic.co/apm"
 )
 
-// TXFromCtx Creates a new TX if none is found in the context, otherwise reuses
-// the existing one.
-//
-// Note on TX and Span naming:
-//
-// The name and type of a transaction and span depend on the specific operation
-// being performed by the request. Here's an example of how you might name and
-// type a transaction and span for an incoming request to insert data into a db:
-//
-// Transaction:
-//
-// - Name: "post-user"
-// - Type: "request.post.user"
-//
-// Span:
-//
-// - Name: "insert-user"
-// - Type: "db.sql.insert"
-//
-// In this example, the tx was named "post-user" to describe the operation being
-// performed "request.post.user".
-//
-// For the span, it was named "insert-user" to describe a specific operation
-// being performed by the span. It was also categorized as "db.sql.insert",
-// which indicates that it involves a database operation.
-//
-// If the span type contains two dots, they are assumed to separate the type and
-// subtype parts of the span type. The action will not be set in this case.
-//
-// For example, if you use a span type of "db.sql.insert", this indicates that
-// the span represents a database operation of type "db", subtype "sql", and
-// action "insert". The StartSpan() method will automatically parse the span
-// type string and set the appropriate values for the Type, Subtype, and Action
-// fields of the SpanData object.
-//
-// If you use a span type of "db.sql", this indicates that the span represents
-// a database operation of type "db" and subtype "sql". The Action field of
-// the SpanData object will be left blank in this case.
-//
-// If you use a span type of "db", this indicates that the span represents a
-// generic database operation of type "db". Both the Subtype and Action fields
-// of the SpanData object will be left blank in this case.
-func TXFromCtx(ctx context.Context, txName string, txType string) *apm.Transaction {
-	tx := apm.TransactionFromContext(ctx)
-	if tx == nil {
-		tx = apm.DefaultTracer.StartTransaction(txName, txType)
+//////
+// Vars, consts, and types.
+//////
+
+// Ender owns a traced span and, when Trace created it, its transaction.
+type Ender struct {
+	span        *apm.Span
+	transaction *apm.Transaction
+}
+
+//////
+// Methods.
+//////
+
+// End ends the span before ending the transaction owned by this ender.
+func (e Ender) End() {
+	e.span.End()
+
+	if e.transaction != nil {
+		e.transaction.End()
 	}
+}
+
+// TXFromCtx returns the transaction in ctx or starts one with txName and
+// txType when none is present. The caller must end a transaction started by
+// this function.
+func TXFromCtx(ctx context.Context, txName string, txType string) *apm.Transaction {
+	tx, _ := txFromCtx(ctx, txName, txType)
 
 	return tx
+}
+
+// txFromCtx returns a transaction and whether it was created by this call.
+func txFromCtx(ctx context.Context, txName string, txType string) (*apm.Transaction, bool) {
+	tx := apm.TransactionFromContext(ctx)
+	if tx == nil {
+		return apm.DefaultTracer.StartTransaction(txName, txType), true
+	}
+
+	return tx, false
 }
 
 // logAndMetrics logs and metrics.
@@ -85,79 +75,44 @@ func logAndMetrics(
 	//////
 
 	// Correlates the transaction, span and log, and logs it.
-	if l != nil {
+	if logging.Admits(l, level.Debug) {
+		message := what + "." + nameOf + "." + operation.String()
+
 		l.PrintlnWithOptions(
 			level.Debug,
-			fmt.Sprintf("%s.%s.%s", what, nameOf, operation),
+			message,
 			sypl.WithFields(logging.ToAPM(ctx, make(fields.Fields))),
 		)
 	}
 }
 
-// Trace will trace an operation. It uses the existing TX otherwise it fallback
-// creating a new TX then it creates a new span within the TX.
-//
-// NOTE: It's up to the developer to call `span.End()`.
-//
-// Note on TX and Span naming:
-//
-// The name and type of a transaction and span depend on the specific operation
-// being performed by the request. Here's an example of how you might name and
-// type a transaction and span for an incoming request to insert data into a db:
-//
-// Transaction:
-//
-// - Name: "post-user"
-// - Type: "request.post.user"
-//
-// Span:
-//
-// - Name: "insert-user"
-// - Type: "db.sql.insert"
-//
-// In this example, the tx was named "post-user" to describe the operation being
-// performed "request.post.user".
-//
-// For the span, it was named "insert-user" to describe a specific operation
-// being performed by the span. It was also categorized as "db.sql.insert",
-// which indicates that it involves a database operation.
-//
-// If the span type contains two dots, they are assumed to separate the type and
-// subtype parts of the span type. The action will not be set in this case.
-//
-// For example, if you use a span type of "db.sql.insert", this indicates that
-// the span represents a database operation of type "db", subtype "sql", and
-// action "insert". The StartSpan() method will automatically parse the span
-// type string and set the appropriate values for the Type, Subtype, and Action
-// fields of the SpanData object.
-//
-// If you use a span type of "db.sql", this indicates that the span represents
-// a database operation of type "db" and subtype "sql". The Action field of
-// the SpanData object will be left blank in this case.
-//
-// If you use a span type of "db", this indicates that the span represents a
-// generic database operation of type "db". Both the Subtype and Action fields
-// of the SpanData object will be left blank in this case.
+// Trace starts a span in the transaction from ctx, creating a transaction when
+// necessary. It returns the tracing context and an Ender that the caller must
+// end. metric is incremented when non-nil.
 func Trace(
 	ctx context.Context,
 	what, nameOf string,
 	operation status.Status,
 	l sypl.ISypl,
 	metric *expvar.Int,
-) (context.Context, *apm.Span) {
-	tx := TXFromCtx(ctx, nameOf, what)
+) (context.Context, Ender) {
+	tx, created := txFromCtx(ctx, nameOf, what)
 
 	ctx = apm.ContextWithTransaction(ctx, tx)
 
-	sType := fmt.Sprintf("%s.%s.%s", what, nameOf, operation)
+	sType := what + "." + nameOf + "." + operation.String()
 
 	span, ctx := apm.StartSpan(
 		ctx,
-		fmt.Sprintf("%s.%s", nameOf, operation),
+		nameOf+"."+operation.String(),
 		sType,
 	)
 
 	logAndMetrics(ctx, what, nameOf, operation, l, metric)
 
-	return ctx, span
+	if created {
+		return ctx, Ender{span: span, transaction: tx}
+	}
+
+	return ctx, Ender{span: span}
 }

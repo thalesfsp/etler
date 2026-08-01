@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/thalesfsp/concurrentloop"
-	"github.com/thalesfsp/etler/v3/converter"
-	"github.com/thalesfsp/etler/v3/internal/customapm"
-	"github.com/thalesfsp/etler/v3/internal/logging"
-	"github.com/thalesfsp/etler/v3/internal/metrics"
-	"github.com/thalesfsp/etler/v3/internal/shared"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/customerror/v2"
+	"github.com/thalesfsp/etler/v4/converter"
+	"github.com/thalesfsp/etler/v4/internal/customapm"
+	"github.com/thalesfsp/etler/v4/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/metrics"
+	"github.com/thalesfsp/etler/v4/internal/shared"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/level"
@@ -26,31 +27,31 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies stage entities.
 const Type = "stage"
 
-// Stage definition.
+// Stage runs processors and converts the resulting items.
 type Stage[ProcessingData, ConvertedData any] struct {
-	// Description of the stage.
+	// Description describes the stage.
 	Description string `json:"description"`
 
-	// Conversor to be used tsk the stage.
+	// Conversor converts each processed item. It must be safe for concurrent
+	// use.
 	Conversor converter.IConverter[ProcessingData, ConvertedData] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records stage lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the stage.
+	// Name identifies the stage.
 	Name string `json:"name" validate:"required"`
 
-	// OnFinished is the function that is called when a processor finishes its
-	// execution.
-	OnFinished OnFinished[ProcessingData, ConvertedData] `json:"-"`
+	// onFinished is called after a stage succeeds.
+	onFinished OnFinished[ProcessingData, ConvertedData] `json:"-"`
 
-	// Processors to be run tsk the stage.
+	// Processors contains the processors run in declaration order.
 	Processors []processor.IProcessor[ProcessingData] `json:"processors" validate:"required,gt=0"`
 
-	// Metrics.
+	// Lifecycle and progress metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterDone    *expvar.Int `json:"counterDone"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
@@ -61,6 +62,9 @@ type Stage[ProcessingData, ConvertedData any] struct {
 	Progress        *expvar.Int    `json:"progress"`
 	ProgressPercent *expvar.String `json:"progressPercent"`
 	Status          *expvar.String `json:"status"`
+
+	// mu guards onFinished.
+	mu sync.RWMutex
 }
 
 //////
@@ -102,17 +106,20 @@ func (s *Stage[ProcessingData, ConvertedData]) GetCounterDone() *expvar.Int {
 	return s.CounterDone
 }
 
-// GetProgress returns the `CounterProgress` of the stage.
+// GetProgress returns the number of processors completed in the current or
+// most recent run.
 func (s *Stage[ProcessingData, ConvertedData]) GetProgress() *expvar.Int {
 	return s.Progress
 }
 
-// GetProgressPercent returns the `ProgressPercent` of the stage.
+// GetProgressPercent returns the percentage of processors that completed
+// successfully. It does not indicate overall stage success and can be 100%
+// when conversion fails after every processor completes.
 func (s *Stage[ProcessingData, ConvertedData]) GetProgressPercent() *expvar.String {
 	return s.ProgressPercent
 }
 
-// SetProgressPercent sets the `ProgressPercent` of the stage.
+// SetProgressPercent recalculates the completed-processor percentage.
 func (s *Stage[ProcessingData, ConvertedData]) SetProgressPercent() {
 	currentProgress := s.GetProgress().Value()
 
@@ -135,12 +142,18 @@ func (s *Stage[ProcessingData, ConvertedData]) GetStatus() *expvar.String {
 
 // GetOnFinished returns the `OnFinished` function.
 func (s *Stage[ProcessingData, ConvertedData]) GetOnFinished() OnFinished[ProcessingData, ConvertedData] {
-	return s.OnFinished
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return s.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (s *Stage[ProcessingData, ConvertedData]) SetOnFinished(onFinished OnFinished[ProcessingData, ConvertedData]) {
-	s.OnFinished = onFinished
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.onFinished = onFinished
 }
 
 // GetType returns the entity type.
@@ -153,12 +166,13 @@ func (s *Stage[ProcessingData, ConvertedData]) GetCreatedAt() time.Time {
 	return s.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the most recent run duration in milliseconds, excluding
+// the completion callback.
 func (s *Stage[ProcessingData, ConvertedData]) GetDuration() *expvar.Int {
 	return s.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns a snapshot of the stage's metrics as strings.
 func (s *Stage[ProcessingData, ConvertedData]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":       s.GetCreatedAt().String(),
@@ -173,13 +187,17 @@ func (s *Stage[ProcessingData, ConvertedData]) GetMetrics() map[string]string {
 	}
 }
 
-// Run the transform function.
+// Run visits processors in declaration order, feeds each synchronous output
+// into the next processor, converts the resulting items concurrently, and
+// returns the updated task. Async processor outputs are not forwarded, but Run
+// waits for them and returns their errors. A stage instance must not run
+// concurrently with itself; separate instances run independently.
 func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task.Task[ProcessingData, ConvertedData]) (task.Task[ProcessingData, ConvertedData], error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		s.GetName(),
@@ -187,19 +205,28 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 		s.GetLogger(),
 		s.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
+
+	now := time.Now()
+	durationSet := false
+
+	defer func() {
+		if !durationSet {
+			s.GetDuration().Set(time.Since(now).Milliseconds())
+		}
+	}()
 
 	// Update the status.
 	s.GetStatus().Set(status.Runnning.String())
 
-	s.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	if logging.Admits(s.GetLogger(), level.Trace) {
+		s.GetLogger().PrintlnWithOptions(level.Trace, status.Runnning.String())
+	}
 
 	// Progress is relative to the current run.
 	s.GetProgress().Set(0)
 
 	s.SetProgressPercent()
-
-	now := time.Now()
 
 	//////
 	// Run stage.
@@ -222,7 +249,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	// NOTE: It process the data sequentially.
 	for _, proc := range s.Processors {
-		if proc.GetAsync() {
+		async := proc.GetAsync()
+		if async {
 			// The goroutine gets its own copy of the data as it was at this
 			// processor's position in the chain. A slice-header snapshot
 			// isn't enough: a later sync processor mutating the slice in
@@ -243,8 +271,14 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 					defer asyncMu.Unlock()
 
 					asyncErrs = append(asyncErrs, err)
+
+					return
 				}
+
+				s.GetProgress().Add(1)
 			}()
+
+			continue
 		} else {
 			// Re-use the output of the previous stage as the input of the
 			// next stage ensuring that the data is processed sequentially.
@@ -262,6 +296,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 				// processors before failing.
 				asyncWG.Wait()
 
+				s.SetProgressPercent()
+
 				// Returns whatever is tsk `out` and the error.
 				//
 				// Don't need tracing, it's already traced.
@@ -271,6 +307,9 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 			// Update the input with the output.
 			retroFeedIn = rFI
+			if retroFeedIn == nil {
+				retroFeedIn = make([]ProcessingData, 0)
+			}
 		}
 
 		//////
@@ -303,6 +342,8 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 	// Join the async processors: the stage is not done while they run, and
 	// their failures fail the stage.
 	asyncWG.Wait()
+
+	s.SetProgressPercent()
 
 	asyncErr := errors.Join(asyncErrs...)
 
@@ -353,27 +394,31 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 
 	tsk.ConvertedData = convertedData
 
-	if s.GetOnFinished() != nil {
-		s.GetOnFinished()(ctx, s, originalTask, tsk)
-	}
-
 	// Set duration.
 	s.GetDuration().Set(time.Since(now).Milliseconds())
+	durationSet = true
+
+	onFinished := s.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, s, originalTask, tsk)
+	}
 
 	// Print the stage's status.
-	s.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", s.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", s.GetCounterCreated().String()),
-		sypl.WithField("counterDone", s.GetCounterDone().String()),
-		sypl.WithField("counterFailed", s.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", s.GetCounterRunning().String()),
-		sypl.WithField("duration", s.GetDuration().String()),
-		sypl.WithField("progress", s.GetProgress().String()),
-		sypl.WithField("progressPercent", s.GetProgressPercent().String()),
-		sypl.WithField("status", s.GetStatus().String()),
-	)
+	if logging.Admits(s.GetLogger(), level.Debug) {
+		s.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", s.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", s.GetCounterCreated().String()),
+			sypl.WithField("counterDone", s.GetCounterDone().String()),
+			sypl.WithField("counterFailed", s.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", s.GetCounterRunning().String()),
+			sypl.WithField("duration", s.GetDuration().String()),
+			sypl.WithField("progress", s.GetProgress().String()),
+			sypl.WithField("progressPercent", s.GetProgressPercent().String()),
+			sypl.WithField("status", s.GetStatus().String()),
+		)
+	}
 
 	return tsk, nil
 }
@@ -382,13 +427,33 @@ func (s *Stage[ProcessingData, ConvertedData]) Run(ctx context.Context, tsk task
 // Factory.
 //////
 
-// New returns a new stage.
+// New creates a stage with a non-nil converter and at least one processor. The
+// converter must be safe for concurrent use because Run converts items
+// concurrently. Processors must not mutate their input slice or pointed-to
+// values.
 func New[ProcessingData, ConvertedData any](
 	name string,
 	description string,
 	conversor converter.IConverter[ProcessingData, ConvertedData],
 	processors ...processor.IProcessor[ProcessingData],
 ) (IStage[ProcessingData, ConvertedData], error) {
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
+	for position, proc := range processors {
+		if shared.IsNil(proc) {
+			return nil, customerror.NewRequiredError(
+				"processor",
+				customerror.WithField("position", position),
+			)
+		}
+	}
+
 	s := &Stage[ProcessingData, ConvertedData]{
 		Logger:     logging.Get().New(name).SetTags(Type, name),
 		Processors: processors,
@@ -397,22 +462,23 @@ func New[ProcessingData, ConvertedData any](
 		CreatedAt:   time.Now(),
 		Name:        name,
 		Description: description,
-
-		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
-		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
-		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
-		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-
-		Duration:        metrics.NewIntWithPattern(Type, name, "duration"),
-		Progress:        metrics.NewIntWithPattern(Type, name, "progress"),
-		ProgressPercent: metrics.NewStringWithPattern(Type, name, "progressPercent"),
-		Status:          metrics.NewStringWithPattern(Type, name, status.Name),
 	}
 
-	// Validation.
+	// Validate caller-supplied fields before constructing metrics because
+	// published expvars cannot be removed.
 	if err := validation.Validate(s); err != nil {
 		return nil, err
 	}
+
+	s.CounterCreated = metrics.NewIntWithPattern(Type, name, status.Created)
+	s.CounterDone = metrics.NewIntWithPattern(Type, name, status.Done)
+	s.CounterFailed = metrics.NewIntWithPattern(Type, name, status.Failed)
+	s.CounterRunning = metrics.NewIntWithPattern(Type, name, status.Runnning)
+
+	s.Duration = metrics.NewIntWithPattern(Type, name, "duration")
+	s.Progress = metrics.NewIntWithPattern(Type, name, "progress")
+	s.ProgressPercent = metrics.NewStringWithPattern(Type, name, "progressPercent")
+	s.Status = metrics.NewStringWithPattern(Type, name, status.Name)
 
 	//////
 	// Observability: tracing, metrics, status, logging, etc.

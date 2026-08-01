@@ -10,10 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/dal/v2/memory"
-	"github.com/thalesfsp/etler/v3/converters/passthru"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/processors/storage"
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/converters/passthru"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/processors/storage"
+	"github.com/thalesfsp/etler/v4/task"
 	"github.com/thalesfsp/params/v2/list"
 	"github.com/thalesfsp/status"
 )

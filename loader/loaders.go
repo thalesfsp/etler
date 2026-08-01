@@ -3,12 +3,15 @@ package loader
 import (
 	"context"
 	"expvar"
+	"reflect"
+	"sync"
 	"time"
 
-	"github.com/thalesfsp/etler/v3/internal/customapm"
-	"github.com/thalesfsp/etler/v3/internal/logging"
-	"github.com/thalesfsp/etler/v3/internal/metrics"
-	"github.com/thalesfsp/etler/v3/internal/shared"
+	"github.com/thalesfsp/customerror/v2"
+	"github.com/thalesfsp/etler/v4/internal/customapm"
+	"github.com/thalesfsp/etler/v4/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/metrics"
+	"github.com/thalesfsp/etler/v4/internal/shared"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/level"
@@ -19,32 +22,30 @@ import (
 // Consts, vars and types.
 //////
 
-// Type of the entity.
+// Type identifies loader entities.
 const Type = "loader"
 
-// Load is a function that converts the data (`in`). It returns the
-// converted data and any errors that occurred during conversion.
+// Load retrieves or decodes data from in.
 type Load[In, Out any] func(ctx context.Context, in In) (out Out, err error)
 
-// Loader definition.
+// Loader wraps a load function with lifecycle observability.
 type Loader[In, Out any] struct {
-	// Description of the processor.
+	// Description describes the loader.
 	Description string `json:"description"`
 
-	// Conversion function.
+	// Func loads data from one input.
 	Func Load[In, Out] `json:"-" validate:"required"`
 
-	// Logger is the internal logger.
+	// Logger records loader lifecycle events.
 	Logger sypl.ISypl `json:"-" validate:"required"`
 
-	// Name of the stage.
+	// Name identifies the loader.
 	Name string `json:"name" validate:"required"`
 
-	// OnFinished is the function that is called when a processor finishes its
-	// execution.
-	OnFinished OnFinished[In, Out] `json:"-"`
+	// onFinished is called after a load succeeds.
+	onFinished OnFinished[In, Out] `json:"-"`
 
-	// Metrics.
+	// Lifecycle metrics.
 	CounterCreated *expvar.Int `json:"counterCreated"`
 	CounterRunning *expvar.Int `json:"counterRunning"`
 	CounterFailed  *expvar.Int `json:"counterFailed"`
@@ -53,23 +54,26 @@ type Loader[In, Out any] struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	Duration  *expvar.Int    `json:"duration"`
 	Status    *expvar.String `json:"status"`
+
+	// mu guards onFinished.
+	mu sync.RWMutex
 }
 
 //////
 // Methods.
 //////
 
-// GetDescription returns the `Description` of the processor.
+// GetDescription returns the loader's description.
 func (c *Loader[In, Out]) GetDescription() string {
 	return c.Description
 }
 
-// GetLogger returns the `Logger` of the processor.
+// GetLogger returns the loader's logger.
 func (c *Loader[In, Out]) GetLogger() sypl.ISypl {
 	return c.Logger
 }
 
-// GetName returns the `Name` of the stage.
+// GetName returns the loader's name.
 func (c *Loader[In, Out]) GetName() string {
 	return c.Name
 }
@@ -79,22 +83,22 @@ func (c *Loader[In, Out]) GetType() string {
 	return Type
 }
 
-// GetCounterCreated returns the `CounterCreated` of the processor.
+// GetCounterCreated returns the loader's created counter.
 func (c *Loader[In, Out]) GetCounterCreated() *expvar.Int {
 	return c.CounterCreated
 }
 
-// GetCounterRunning returns the `CounterRunning` of the processor.
+// GetCounterRunning returns the loader's running counter.
 func (c *Loader[In, Out]) GetCounterRunning() *expvar.Int {
 	return c.CounterRunning
 }
 
-// GetCounterFailed returns the `CounterFailed` of the processor.
+// GetCounterFailed returns the loader's failed counter.
 func (c *Loader[In, Out]) GetCounterFailed() *expvar.Int {
 	return c.CounterFailed
 }
 
-// GetCounterDone returns the `CounterDone` of the processor.
+// GetCounterDone returns the loader's done counter.
 func (c *Loader[In, Out]) GetCounterDone() *expvar.Int {
 	return c.CounterDone
 }
@@ -106,25 +110,32 @@ func (c *Loader[In, Out]) GetStatus() *expvar.String {
 
 // GetOnFinished returns the `OnFinished` function.
 func (c *Loader[In, Out]) GetOnFinished() OnFinished[In, Out] {
-	return c.OnFinished
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.onFinished
 }
 
 // SetOnFinished sets the `OnFinished` function.
 func (c *Loader[In, Out]) SetOnFinished(onFinished OnFinished[In, Out]) {
-	c.OnFinished = onFinished
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.onFinished = onFinished
 }
 
-// GetCreatedAt returns the created at time.
+// GetCreatedAt returns when the loader was constructed.
 func (c *Loader[In, Out]) GetCreatedAt() time.Time {
 	return c.CreatedAt
 }
 
-// GetDuration returns the `CounterDuration` of the stage.
+// GetDuration returns the most recent successful load duration in milliseconds.
+// A failed load does not replace it.
 func (c *Loader[In, Out]) GetDuration() *expvar.Int {
 	return c.Duration
 }
 
-// GetMetrics returns the stage's metrics.
+// GetMetrics returns a snapshot of the loader's metrics as strings.
 func (c *Loader[In, Out]) GetMetrics() map[string]string {
 	return map[string]string{
 		"createdAt":      c.GetCreatedAt().String(),
@@ -137,13 +148,13 @@ func (c *Loader[In, Out]) GetMetrics() map[string]string {
 	}
 }
 
-// Run the conversion function.
+// Run invokes the load function and updates lifecycle observability.
 func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	//////
 	// Observability: tracing, metrics, status, logging, etc.
 	//////
 
-	tracedContext, span := customapm.Trace(
+	tracedContext, ender := customapm.Trace(
 		ctx,
 		Type,
 		c.GetName(),
@@ -151,11 +162,13 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 		c.Logger,
 		c.CounterRunning,
 	)
-	defer span.End()
+	defer ender.End()
 
 	c.GetStatus().Set(status.Runnning.String())
 
-	c.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	if logging.Admits(c.GetLogger(), level.Debug) {
+		c.GetLogger().PrintlnWithOptions(level.Debug, status.Runnning.String())
+	}
 
 	//////
 	// Run conversor.
@@ -190,26 +203,29 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 	// Increment the done counter.
 	c.GetCounterDone().Add(1)
 
-	// Run onEvent callback.
-	if c.GetOnFinished() != nil {
-		c.GetOnFinished()(ctx, c, in, out)
-	}
-
 	// Set duration.
 	c.GetDuration().Set(time.Since(now).Milliseconds())
 
+	// Run onEvent callback.
+	onFinished := c.GetOnFinished()
+	if onFinished != nil {
+		onFinished(ctx, c, in, out)
+	}
+
 	// Print the stage's status.
-	c.GetLogger().PrintWithOptions(
-		level.Debug,
-		status.Done.String(),
-		sypl.WithField("createdAt", c.GetCreatedAt().String()),
-		sypl.WithField("counterCreated", c.GetCounterCreated().String()),
-		sypl.WithField("counterDone", c.GetCounterDone().String()),
-		sypl.WithField("counterFailed", c.GetCounterFailed().String()),
-		sypl.WithField("counterRunning", c.GetCounterRunning().String()),
-		sypl.WithField("duration", c.GetDuration().String()),
-		sypl.WithField("status", c.GetStatus().String()),
-	)
+	if logging.Admits(c.GetLogger(), level.Debug) {
+		c.GetLogger().PrintWithOptions(
+			level.Debug,
+			status.Done.String(),
+			sypl.WithField("createdAt", c.GetCreatedAt().String()),
+			sypl.WithField("counterCreated", c.GetCounterCreated().String()),
+			sypl.WithField("counterDone", c.GetCounterDone().String()),
+			sypl.WithField("counterFailed", c.GetCounterFailed().String()),
+			sypl.WithField("counterRunning", c.GetCounterRunning().String()),
+			sypl.WithField("duration", c.GetDuration().String()),
+			sypl.WithField("status", c.GetStatus().String()),
+		)
+	}
 
 	return out, nil
 }
@@ -218,36 +234,78 @@ func (c *Loader[In, Out]) Run(ctx context.Context, in In) (Out, error) {
 // Factory.
 //////
 
-// New returns a new stage.
+// New creates a loader. It applies options in order, retains each returned
+// implementation, and then validates the result. Nil options and results are
+// rejected. An option must return a usable implementation; returning one whose
+// embedded interface is nil will panic when it is used, as it would anywhere
+// in Go.
+// Structural validation runs before lifecycle metric getters; the final
+// implementation must expose non-nil lifecycle metrics.
 func New[In, Out any](
 	name, description string,
 	fn Load[In, Out],
 	opts ...Func[In, Out],
 ) (ILoader[In, Out], error) {
-	c := &Loader[In, Out]{
+	// Validate the raw name before constructing metrics because published
+	// expvars cannot be removed.
+	if err := validation.Validate(struct {
+		Name string `validate:"required"`
+	}{Name: name}); err != nil {
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		if opt == nil {
+			return nil, customerror.NewRequiredError("loader option")
+		}
+	}
+
+	base := &Loader[In, Out]{
 		Func:   fn,
 		Logger: logging.Get().New(name).SetTags(Type, name),
 
 		CreatedAt:   time.Now(),
 		Name:        name,
 		Description: description,
-
-		CounterCreated: metrics.NewIntWithPattern(Type, name, status.Created),
-		CounterDone:    metrics.NewIntWithPattern(Type, name, status.Done),
-		CounterFailed:  metrics.NewIntWithPattern(Type, name, status.Failed),
-		CounterRunning: metrics.NewIntWithPattern(Type, name, status.Runnning),
-
-		Duration: metrics.NewIntWithPattern(Type, name, "duration"),
-		Status:   metrics.NewStringWithPattern(Type, name, status.Name),
 	}
+
+	// Validate caller-supplied fields before constructing metrics because
+	// published expvars cannot be removed.
+	if err := validation.Validate(base); err != nil {
+		return nil, err
+	}
+
+	base.CounterCreated = metrics.NewIntWithPattern(Type, name, status.Created)
+	base.CounterDone = metrics.NewIntWithPattern(Type, name, status.Done)
+	base.CounterFailed = metrics.NewIntWithPattern(Type, name, status.Failed)
+	base.CounterRunning = metrics.NewIntWithPattern(Type, name, status.Runnning)
+
+	base.Duration = metrics.NewIntWithPattern(Type, name, "duration")
+	base.Status = metrics.NewStringWithPattern(Type, name, status.Name)
+
+	var c ILoader[In, Out] = base
 
 	// Apply options.
 	for _, opt := range opts {
-		opt(c)
+		c = opt(c)
+		if c == nil {
+			return nil, customerror.NewRequiredError("loader option result")
+		}
+		value := reflect.ValueOf(c)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			if value.IsNil() {
+				return nil, customerror.NewRequiredError("loader option result")
+			}
+		}
 	}
 
 	// Validation.
 	if err := validation.Validate(c); err != nil {
+		return nil, err
+	}
+
+	if err := validateOptionMetrics(c); err != nil {
 		return nil, err
 	}
 
@@ -259,7 +317,30 @@ func New[In, Out any](
 
 	c.GetCounterCreated().Add(1)
 
-	c.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
+	if logging.Admits(c.GetLogger(), level.Debug) {
+		c.GetLogger().PrintlnWithOptions(level.Debug, status.Created.String())
+	}
 
 	return c, nil
+}
+
+// validateOptionMetrics ensures options retain the metrics dereferenced by
+// loader lifecycle observability.
+func validateOptionMetrics[In, Out any](c ILoader[In, Out]) error {
+	switch {
+	case c.GetStatus() == nil:
+		return customerror.NewRequiredError("loader status metric")
+	case c.GetCounterCreated() == nil:
+		return customerror.NewRequiredError("loader created counter")
+	case c.GetCounterRunning() == nil:
+		return customerror.NewRequiredError("loader running counter")
+	case c.GetCounterFailed() == nil:
+		return customerror.NewRequiredError("loader failed counter")
+	case c.GetCounterDone() == nil:
+		return customerror.NewRequiredError("loader done counter")
+	case c.GetDuration() == nil:
+		return customerror.NewRequiredError("loader duration metric")
+	default:
+		return nil
+	}
 }

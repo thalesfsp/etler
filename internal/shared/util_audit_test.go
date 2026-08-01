@@ -55,6 +55,100 @@ func TestExtractID_customFieldName(t *testing.T) {
 	assert.Equal(t, "c1", ExtractID(withCode{Code: "c1", ID: "i1"}, "Code"))
 }
 
+// Regression: a configured field must win even when a conventional ID field
+// appears first in the struct.
+func TestExtractID_configuredFieldPrecedesEarlierDefaultID(t *testing.T) {
+	type withExternalID struct {
+		ID         string
+		ExternalID string
+	}
+
+	assert.Equal(
+		t,
+		"right",
+		ExtractID(withExternalID{ID: "wrong", ExternalID: "right"}, "ExternalID"),
+	)
+}
+
+func TestExtractID_pointerValuesAreDereferenced(t *testing.T) {
+	type withID struct {
+		ID *string
+	}
+
+	firstValue := "stable"
+	secondValue := "stable"
+
+	firstID := ExtractID(withID{ID: &firstValue}, "")
+	secondID := ExtractID(withID{ID: &secondValue}, "")
+
+	assert.Equal(t, "stable", firstID)
+	assert.Equal(t, firstID, secondID)
+}
+
+func TestExtractID_nilAndWhitespaceValuesAreAbsent(t *testing.T) {
+	type withID struct {
+		ID *string
+	}
+
+	var nilID *string
+	whitespaceID := " \t\n"
+
+	assert.Empty(t, ExtractID(withID{ID: nilID}, ""))
+	assert.Empty(t, ExtractID(withID{ID: &whitespaceID}, ""))
+}
+
+type auditStringerID struct {
+	calls *int
+}
+
+func (id auditStringerID) String() string {
+	(*id.calls)++
+
+	return "stringer-id"
+}
+
+func TestExtractID_supportedAndUnsupportedKinds(t *testing.T) {
+	t.Run("pointer to string yields stable pointed-to value", func(t *testing.T) {
+		type withID struct {
+			ID *string
+		}
+
+		value := "stable"
+		item := withID{ID: &value}
+
+		first := ExtractID(item, "")
+		second := ExtractID(item, "")
+
+		assert.Equal(t, "stable", first)
+		assert.Equal(t, first, second)
+	})
+
+	t.Run("nil pointer is absent", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID *string }{}, ""))
+	})
+
+	t.Run("whitespace-only string is absent", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID string }{ID: " \t\n"}, ""))
+	})
+
+	t.Run("unsupported kind", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID []string }{ID: []string{"not", "an", "id"}}, ""))
+	})
+
+	t.Run("fmt.Stringer is not used implicitly", func(t *testing.T) {
+		calls := 0
+
+		assert.Empty(t, ExtractID(struct{ ID auditStringerID }{
+			ID: auditStringerID{calls: &calls},
+		}, ""))
+		assert.Zero(t, calls)
+	})
+
+	t.Run("uintptr is unsupported", func(t *testing.T) {
+		assert.Empty(t, ExtractID(struct{ ID uintptr }{ID: 42}, ""))
+	})
+}
+
 // Happy path: ID found on an embedded (anonymous) EXPORTED struct.
 func TestExtractID_embeddedID(t *testing.T) {
 	v := embeddedIDHolder{

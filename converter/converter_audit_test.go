@@ -3,6 +3,7 @@ package converter
 import (
 	"context"
 	"errors"
+	"expvar"
 	"testing"
 	"time"
 
@@ -10,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/thalesfsp/status"
 )
+
+type replacementConverter struct {
+	IConverter[int, int]
+}
+
+type converterWithNilStatus struct {
+	IConverter[int, int]
+}
+
+func (c *converterWithNilStatus) GetStatus() *expvar.String {
+	return nil
+}
 
 // Edge case: a converter without a conversion function is a configuration
 // error — it would panic at Run time otherwise.
@@ -33,6 +46,91 @@ func TestConverter_mustDefault_nilFunc_panics(t *testing.T) {
 	assert.Panics(t, func() {
 		MustDefault[int, int](nil)
 	})
+}
+
+// A return-valued option may replace or wrap the converter.
+func TestConverter_new_usesOptionReturnValue(t *testing.T) {
+	var replacement *replacementConverter
+
+	got, err := New(
+		"replacement-option-converter",
+		"uses the option return value",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		func(c IConverter[int, int]) IConverter[int, int] {
+			replacement = &replacementConverter{IConverter: c}
+
+			return replacement
+		},
+	)
+	require.NoError(t, err)
+	assert.Same(t, replacement, got)
+}
+
+// Returning nil from an option is an invalid constructor result.
+func TestConverter_new_rejectsNilOptionReturn(t *testing.T) {
+	got, err := New(
+		"nil-option-converter",
+		"rejects a nil option return",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		func(IConverter[int, int]) IConverter[int, int] {
+			return nil
+		},
+	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// A nil option is invalid input and must be rejected before invocation.
+func TestConverter_new_rejectsNilOptionWithoutPanic(t *testing.T) {
+	var opt Func[int, int]
+
+	var (
+		got IConverter[int, int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-option-function-converter",
+			"rejects a nil option function",
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+			opt,
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// An option replacement must retain non-nil metric getters.
+func TestConverter_new_rejectsNilMetricGetterWithoutPanic(t *testing.T) {
+	var (
+		got IConverter[int, int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-metric-getter-converter",
+			"rejects a nil metric getter",
+			func(ctx context.Context, in int) (int, error) {
+				return in, nil
+			},
+			func(c IConverter[int, int]) IConverter[int, int] {
+				return &converterWithNilStatus{IConverter: c}
+			},
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
 }
 
 // Bad path: a failing conversion must propagate the cause and update metrics.
@@ -87,4 +185,34 @@ func TestConverter_onFinished_receivesInAndOut(t *testing.T) {
 
 	assert.Equal(t, 21, gotIn)
 	assert.Equal(t, 42, gotOut)
+}
+
+// Completion callback time is not part of the conversion duration.
+func TestConverter_durationExcludesOnFinished(t *testing.T) {
+	const (
+		callbackDelay = 500 * time.Millisecond
+		maxDuration   = 250 * time.Millisecond
+	)
+
+	callbackCalls := 0
+
+	conv, err := New(
+		"duration-excludes-onfinished-converter",
+		"records only conversion duration",
+		func(ctx context.Context, in int) (int, error) {
+			return in, nil
+		},
+		WithOnFinished(func(ctx context.Context, c IConverter[int, int], in int, out int) {
+			callbackCalls++
+			time.Sleep(callbackDelay)
+		}),
+	)
+	require.NoError(t, err)
+
+	_, err = conv.Run(context.Background(), 1)
+	require.NoError(t, err)
+	require.Equal(t, 1, callbackCalls, "OnFinished must run exactly once")
+
+	duration := time.Duration(conv.GetDuration().Value()) * time.Millisecond
+	require.Less(t, duration, maxDuration, "duration must exclude completion callback")
 }

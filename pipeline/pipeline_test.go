@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/thalesfsp/etler/v3/converter"
-	"github.com/thalesfsp/etler/v3/processor"
-	"github.com/thalesfsp/etler/v3/stage"
+	"github.com/thalesfsp/etler/v4/converter"
+	"github.com/thalesfsp/etler/v4/processor"
+	"github.com/thalesfsp/etler/v4/stage"
 	"github.com/thalesfsp/status"
 )
 

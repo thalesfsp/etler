@@ -2,12 +2,16 @@ package logging
 
 import (
 	"context"
+	"os"
+	"reflect"
 	"sync"
 
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/fields"
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/sypl/v2/processor"
+	"github.com/thalesfsp/sypl/v2/shared"
+	"github.com/thalesfsp/sypl/v2/status"
 	"go.elastic.co/apm"
 )
 
@@ -21,8 +25,9 @@ var (
 	singletonLogger *Logger
 )
 
-// Logger is the application logger.
+// Logger is the application's shared sypl logger.
 type Logger struct {
+	// Sypl provides the underlying logging implementation.
 	*sypl.Sypl
 }
 
@@ -30,10 +35,67 @@ type Logger struct {
 // Exported functionalities.
 //////
 
-// Get returns a setup logger, or set it up. Default level is `ERROR`.
+// Admits reports whether a log call at `lvl` can actually reach an output, so
+// callers can skip building a payload that would be discarded.
 //
-// All messages will be directed to StdOut unless in case of ERROR level, which
-// will be directed to StdErr.
+// It mirrors sypl's own fast-gate rule (`(*Sypl).fastGated`) for output levels
+// and runtime overrides:
+//
+//   - `SYPL_LEVEL` and `SYPL_FILTER` raise levels and filter by component at
+//     runtime, so when either is set this defers to sypl and admits everything.
+//   - `Fatal` always runs the full pipeline — it exits the process.
+//   - Otherwise a call is admitted when any ENABLED output's max level covers
+//     it. Levels are read live, so reconfiguration is observed immediately.
+//
+// Output processors run before sypl's output-level check and may force a
+// message. IProcessor exposes no capability metadata to distinguish those
+// processors; treating every processor as force-capable would disable this gate
+// because etler attaches ChangeFirstCharCase to every output.
+func Admits(l sypl.ISypl, lvl level.Level) bool {
+	if isNilLogger(l) || lvl == level.None {
+		return false
+	}
+
+	// Both env vars can raise the effective level at runtime. sypl honours them
+	// on its slow path only, so gating here would silently defeat them.
+	if os.Getenv(shared.LevelEnvVar) != "" || os.Getenv(shared.FilterEnvVar) != "" {
+		return true
+	}
+
+	if lvl == level.Fatal {
+		return true
+	}
+
+	for _, o := range l.GetOutputs() {
+		if o.GetStatus() == status.Enabled && lvl <= o.GetMaxLevel() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isNilLogger detects both nil interfaces and interfaces holding nil values.
+func isNilLogger(l sypl.ISypl) bool {
+	if l == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(l)
+
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+// Get returns the process-wide logger, initializing it with Error as its
+// default maximum level on the first call.
+//
+// Non-error messages admitted by the configured maximum level go to standard
+// output; Fatal and Error messages go to standard error.
 //
 // NOTE: Use `SYPL_LEVEL` env var to overwrite the max level.
 func Get() *Logger {
@@ -67,9 +129,9 @@ func Get() *Logger {
 	return singletonLogger
 }
 
-// ToAPM adds the required APM fields enabling log correlation.
-//
-// NOTE: It expects the `apm.Transaction` to be in the context.
+// ToAPM adds trace, transaction, and current-span IDs from ctx to f. It
+// allocates f when nil and leaves it without correlation fields when ctx has no
+// transaction.
 func ToAPM(ctx context.Context, f fields.Fields) fields.Fields {
 	if f == nil {
 		f = fields.Fields{}

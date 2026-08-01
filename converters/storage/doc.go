@@ -1,3 +1,3 @@
-// Package storage contains the storage converter which allows to concurrently
-// store the processed data in a storage system.
+// Package storage provides a converter that creates items in a storage backend
+// and returns their storage keys.
 package storage

@@ -1,3 +1,2 @@
-// Package passthru contains the Passthru converter which just passes through
-// the input.
+// Package passthru provides a converter that returns its input unchanged.
 package passthru

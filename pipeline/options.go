@@ -3,27 +3,27 @@ package pipeline
 import (
 	"context"
 
-	"github.com/thalesfsp/etler/v3/task"
+	"github.com/thalesfsp/etler/v4/task"
 )
 
 //////
 // Consts, vars and types.
 //////
 
-// Func allows to specify message's options.
+// Func configures a pipeline and returns the implementation to retain.
 type Func[ProcessedData, ConvertedOut any] func(p IPipeline[ProcessedData, ConvertedOut]) IPipeline[ProcessedData, ConvertedOut]
 
-// OnFinished is the function that is called when the pipeline finishes its
-// execution. `originalTask` is the task built from the input data; `tasksOut`
-// holds the per-stage results — one task per stage, in stage order (for
-// sequential pipelines the final task is the last element).
+// OnFinished runs after a pipeline succeeds. originalTask is built from the
+// input data; tasksOut contains one result per stage in stage order. Callbacks
+// run after serialized execution is released, may overlap with a later run's
+// callback, and must be safe for concurrent use.
 type OnFinished[ProcessedData, ConvertedOut any] func(ctx context.Context, p IPipeline[ProcessedData, ConvertedOut], originalTask task.Task[ProcessedData, ConvertedOut], tasksOut []task.Task[ProcessedData, ConvertedOut])
 
 //////
 // Built-ProcessedData options.
 //////
 
-// WithOnFinished sets the OnFinished function.
+// WithOnFinished returns a Func that sets the completion callback.
 func WithOnFinished[ProcessedData, ConvertedOut any](onFinished OnFinished[ProcessedData, ConvertedOut]) Func[ProcessedData, ConvertedOut] {
 	return func(p IPipeline[ProcessedData, ConvertedOut]) IPipeline[ProcessedData, ConvertedOut] {
 		p.SetOnFinished(onFinished)

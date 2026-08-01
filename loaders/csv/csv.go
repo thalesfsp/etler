@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/thalesfsp/etler/v3/loader"
-	"github.com/thalesfsp/validation"
+	"github.com/thalesfsp/etler/v4/loader"
 )
 
 //////
 // Consts, vars and types.
 //////
 
-// Name of the loader.
+// Name identifies the CSV loader.
 const Name = "csv"
 
-// CSV definition.
+// CSV loads CSV records from an io.Reader.
 type CSV[Out any] struct {
+	// ILoader provides the loader lifecycle and execution API.
 	loader.ILoader[io.Reader, Out] `json:"loader" validate:"required"`
 }
 
@@ -25,7 +25,7 @@ type CSV[Out any] struct {
 // Factory.
 //////
 
-// New creates a new loader.
+// New creates a CSV loader. Options are applied and validated by loader.New.
 func New[Out any](
 	opts ...loader.Func[io.Reader, []Out],
 ) (*CSV[[]Out], error) {
@@ -55,11 +55,6 @@ func New[Out any](
 
 	// NOTE: `opts` were already applied by `loader.New` — applying them
 	// again here would run each option twice.
-
-	// Validation.
-	if err := validation.Validate(csv); err != nil {
-		return nil, err
-	}
 
 	return csv, nil
 }

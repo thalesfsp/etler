@@ -2,36 +2,62 @@ package shared
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/thalesfsp/customerror/v2"
-	"github.com/thalesfsp/etler/v3/internal/customapm"
+	"github.com/thalesfsp/etler/v4/internal/customapm"
 	"github.com/thalesfsp/status"
 	"github.com/thalesfsp/sypl/v2"
 )
 
-// GenerateIDBasedOnContent generates a SHA-1 hash (content-based) for message
-// ID. Good to be used to avoid duplicated messages.
+// GenerateIDBasedOnContent returns the lowercase SHA-256 hex digest of ct after
+// trimming leading and trailing form feeds, tabs, carriage returns, newlines,
+// and spaces. Equal normalized content produces the same ID.
 func GenerateIDBasedOnContent(ct string) string {
-	return fmt.Sprintf("%x", sha1.Sum([]byte(strings.Trim(ct, "\f\t\r\n "))))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Trim(ct, "\f\t\r\n "))))
 }
 
-// GenerateUUID generates a RFC4122 UUID and DCE 1.1: Authentication and
-// Security Services.
+// GenerateUUID returns a random RFC 4122 UUID string.
 func GenerateUUID() string {
 	return uuid.New().String()
 }
 
-// Flatten2D takes a 2D slice and returns a 1D slice containing all the elements.
-func Flatten2D[T any](data [][]T) []T {
-	var result []T
+// IsNil reports whether value is nil or holds a nil value in an interface.
+func IsNil(value any) bool {
+	if value == nil {
+		return true
+	}
 
+	reflected := reflect.ValueOf(value)
+
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
+// Flatten2D concatenates the inner slices in order. It returns nil when data
+// contains no elements.
+func Flatten2D[T any](data [][]T) []T {
+	total := 0
+	for _, outer := range data {
+		total += len(outer)
+	}
+
+	if total == 0 {
+		return nil
+	}
+
+	result := make([]T, 0, total)
 	for _, outer := range data {
 		result = append(result, outer...)
 	}
@@ -39,12 +65,45 @@ func Flatten2D[T any](data [][]T) []T {
 	return result
 }
 
-// ExtractID extracts `possibleIDFieldNames` from `v` - an arbitrary struct.
+// ExtractID returns an ID from an exported field of t. It matches idFieldName
+// case-insensitively when provided; otherwise it matches ID case-insensitively.
+// Top-level fields take precedence over fields in exported anonymous structs.
 //
-// NOTE: Only exported fields are considered.
+// NOTE: String, int, int8, int16, int32, int64, uint, uint8, uint16, uint32,
+// and uint64 values are supported after pointer and interface dereferencing.
+// Nil pointers, whitespace-only strings, uintptr, fmt.Stringer-only values, and
+// all other kinds are treated as absent.
 func ExtractID[T any](t T, idFieldName string) string {
-	v := reflect.ValueOf(t)
-	for v.Kind() == reflect.Pointer {
+	return extractID(reflect.ValueOf(t), idFieldName, make(map[extractIDPointer]struct{}))
+}
+
+type extractIDPointer struct {
+	address uintptr
+	typ     reflect.Type
+}
+
+func extractID(v reflect.Value, idFieldName string, visited map[extractIDPointer]struct{}) string {
+	// Unwrap pointers and interfaces alike: an embedded interface field holds
+	// its value indirectly, and the traversal has to reach the concrete struct
+	// behind it. Pointers are recorded so a cycle terminates instead of
+	// recursing until the stack overflows.
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return ""
+		}
+
+		if v.Kind() == reflect.Pointer {
+			pointer := extractIDPointer{
+				address: v.Pointer(),
+				typ:     v.Type(),
+			}
+			if _, ok := visited[pointer]; ok {
+				return ""
+			}
+
+			visited[pointer] = struct{}{}
+		}
+
 		v = v.Elem()
 	}
 
@@ -64,19 +123,19 @@ func ExtractID[T any](t T, idFieldName string) string {
 			continue
 		}
 
-		if idFieldName != "" && strings.EqualFold(field.Name, idFieldName) {
-			return fmt.Sprintf("%v", v.Field(i).Interface())
-		}
-
-		if strings.EqualFold(field.Name, "ID") || strings.EqualFold(field.Name, "Id") {
-			return fmt.Sprintf("%v", v.Field(i).Interface())
+		if idFieldName != "" {
+			if strings.EqualFold(field.Name, idFieldName) {
+				return extractIDValue(v.Field(i))
+			}
+		} else if strings.EqualFold(field.Name, "ID") || strings.EqualFold(field.Name, "Id") {
+			return extractIDValue(v.Field(i))
 		}
 	}
 
 	for i := 0; i < tType.NumField(); i++ {
 		field := tType.Field(i)
 		if field.Anonymous && field.IsExported() {
-			if id := ExtractID(v.Field(i).Interface(), idFieldName); id != "" {
+			if id := extractID(v.Field(i), idFieldName, visited); id != "" {
 				return id
 			}
 		}
@@ -85,9 +144,56 @@ func ExtractID[T any](t T, idFieldName string) string {
 	return ""
 }
 
-// Unmarshal with custom error.
+func extractIDValue(v reflect.Value) string {
+	visited := make(map[extractIDPointer]struct{})
+
+	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
+		if v.IsNil() {
+			return ""
+		}
+
+		if v.Kind() == reflect.Pointer {
+			pointer := extractIDPointer{
+				address: v.Pointer(),
+				typ:     v.Type(),
+			}
+			if _, ok := visited[pointer]; ok {
+				return ""
+			}
+
+			visited[pointer] = struct{}{}
+		}
+
+		v = v.Elem()
+	}
+
+	if !v.IsValid() || !v.CanInterface() {
+		return ""
+	}
+
+	switch v.Kind() {
+	case reflect.String:
+		return nonEmptyID(v.String())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10)
+	default:
+		return ""
+	}
+}
+
+func nonEmptyID(id string) string {
+	if strings.TrimSpace(id) == "" {
+		return ""
+	}
+
+	return id
+}
+
+// Unmarshal decodes JSON data into v and wraps decoding errors.
 func Unmarshal(data []byte, v any) error {
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := json.Unmarshal(data, v); err != nil {
 		return customerror.NewFailedToError("to unmarshal",
 			customerror.WithError(err),
 		)
@@ -96,7 +202,7 @@ func Unmarshal(data []byte, v any) error {
 	return nil
 }
 
-// Marshal with custom error.
+// Marshal encodes v as JSON and wraps encoding errors.
 func Marshal(v any) ([]byte, error) {
 	data, err := json.Marshal(&v)
 	if err != nil {
@@ -108,7 +214,7 @@ func Marshal(v any) ([]byte, error) {
 	return data, nil
 }
 
-// Decode process stream `r` into `v` and returns an error if any.
+// Decode reads one JSON value from r into v and wraps decoding errors.
 func Decode(r io.Reader, v any) error {
 	if err := json.NewDecoder(r).Decode(v); err != nil {
 		return customerror.NewFailedToError("decode",
@@ -119,7 +225,7 @@ func Decode(r io.Reader, v any) error {
 	return nil
 }
 
-// Encode process `v` into stream `w` and returns an error if any.
+// Encode writes v as JSON followed by a newline and wraps encoding errors.
 func Encode(w io.Writer, v any) error {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		return customerror.NewFailedToError("encode",
@@ -130,7 +236,7 @@ func Encode(w io.Writer, v any) error {
 	return nil
 }
 
-// ReadAll reads all the data from `r` and returns an error if any.
+// ReadAll reads r to EOF and wraps read errors.
 func ReadAll(r io.Reader) ([]byte, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -140,8 +246,8 @@ func ReadAll(r io.Reader) ([]byte, error) {
 	return b, nil
 }
 
-// OnErrorHandler deals with observability (update status, logging, metrics)
-// when an processor, or stage, or the pipeline error.
+// OnErrorHandler marks an entity failed, records and logs err, and returns the
+// wrapped error.
 func OnErrorHandler(
 	tracedContext context.Context,
 	iMetric IMetrics,

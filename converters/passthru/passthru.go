@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/thalesfsp/etler/v3/converter"
+	"github.com/thalesfsp/etler/v4/converter"
 	"github.com/thalesfsp/validation"
 )
 
@@ -12,11 +12,12 @@ import (
 // Consts, vars and types.
 //////
 
-// Name of the converter.
+// Name identifies the passthrough converter.
 const Name = "passthru"
 
-// Passthru definition.
+// Passthru returns each input value unchanged.
 type Passthru[In any] struct {
+	// IConverter provides the converter lifecycle and execution API.
 	converter.IConverter[In, In] `json:"converter" validate:"required"`
 }
 
@@ -24,7 +25,8 @@ type Passthru[In any] struct {
 // Factory.
 //////
 
-// New creates a new converter.
+// New creates a passthrough converter. Options are applied and validated by
+// converter.New.
 func New[In any](
 	opts ...converter.Func[In, In],
 ) (*Passthru[In], error) {
@@ -58,7 +60,7 @@ func New[In any](
 	return passthru, nil
 }
 
-// Must returns a new converter or panics if an error occurs.
+// Must creates a passthrough converter or panics if validation fails.
 func Must[In any](
 	opts ...converter.Func[In, In],
 ) *Passthru[In] {

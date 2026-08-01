@@ -1,16 +1,61 @@
 package processor
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"expvar"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thalesfsp/etler/v3/internal/shared"
+	"github.com/thalesfsp/etler/v4/internal/shared"
 	"github.com/thalesfsp/status"
+	"github.com/thalesfsp/sypl/v2"
+	"github.com/thalesfsp/sypl/v2/level"
+	"github.com/thalesfsp/sypl/v2/output"
 )
+
+type pauseSignalWriter struct {
+	paused chan struct{}
+	once   sync.Once
+}
+
+func (w *pauseSignalWriter) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte("is paused. Waiting to be resumed")) {
+		w.once.Do(func() {
+			close(w.paused)
+		})
+	}
+
+	return len(p), nil
+}
+
+type replacementProcessor struct {
+	IProcessor[int]
+}
+
+type processorWithNilStatus struct {
+	IProcessor[int]
+}
+
+func (p *processorWithNilStatus) GetStatus() *expvar.String {
+	return nil
+}
+
+func signalProcessorPause(p IProcessor[int]) <-chan struct{} {
+	paused := make(chan struct{})
+	writer := &pauseSignalWriter{paused: paused}
+
+	p.(*Processor[int]).Logger = sypl.New(
+		p.GetName(),
+		output.New(p.GetName()+"-pause-signal", level.Trace, writer),
+	)
+
+	return paused
+}
 
 // Bug: OnFinished must receive the processor's OUTPUT, not the input echoed
 // back.
@@ -55,6 +100,91 @@ func TestProcessor_new_nilFunc_returnsError(t *testing.T) {
 	assert.Error(t, err, "a processor without a transform function must not be created")
 }
 
+// A return-valued option may replace or wrap the processor.
+func TestProcessor_new_usesOptionReturnValue(t *testing.T) {
+	var replacement *replacementProcessor
+
+	got, err := New(
+		"replacement-option-processor",
+		"uses the option return value",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+		func(p IProcessor[int]) IProcessor[int] {
+			replacement = &replacementProcessor{IProcessor: p}
+
+			return replacement
+		},
+	)
+	require.NoError(t, err)
+	assert.Same(t, replacement, got)
+}
+
+// Returning nil from an option is an invalid constructor result.
+func TestProcessor_new_rejectsNilOptionReturn(t *testing.T) {
+	got, err := New(
+		"nil-option-processor",
+		"rejects a nil option return",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+		func(IProcessor[int]) IProcessor[int] {
+			return nil
+		},
+	)
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// A nil option is invalid input and must be rejected before invocation.
+func TestProcessor_new_rejectsNilOptionWithoutPanic(t *testing.T) {
+	var opt Func[int]
+
+	var (
+		got IProcessor[int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-option-function-processor",
+			"rejects a nil option function",
+			func(ctx context.Context, processingData []int) ([]int, error) {
+				return processingData, nil
+			},
+			opt,
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
+// An option replacement must retain non-nil metric getters.
+func TestProcessor_new_rejectsNilMetricGetterWithoutPanic(t *testing.T) {
+	var (
+		got IProcessor[int]
+		err error
+	)
+
+	assert.NotPanics(t, func() {
+		got, err = New(
+			"nil-metric-getter-processor",
+			"rejects a nil metric getter",
+			func(ctx context.Context, processingData []int) ([]int, error) {
+				return processingData, nil
+			},
+			func(p IProcessor[int]) IProcessor[int] {
+				return &processorWithNilStatus{IProcessor: p}
+			},
+		)
+	})
+
+	assert.Nil(t, got)
+	assert.Error(t, err)
+}
+
 // Bad path: a failing transform must propagate the cause and update metrics.
 func TestProcessor_error_updatesMetricsAndPropagatesCause(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -77,7 +207,10 @@ func TestProcessor_error_updatesMetricsAndPropagatesCause(t *testing.T) {
 	assert.Contains(t, err.Error(), "boom-processor-audit")
 
 	assert.Equal(t, status.Failed.String(), failing.GetStatus().Value())
-	assert.Equal(t, int64(1), failing.GetCounterFailed().Value())
+	assert.Equal(t, int64(1), failing.GetCounterFailed().Value(),
+		"ordinary transform errors must increment the failed counter")
+	assert.Equal(t, int64(0), failing.GetCounterInterrupted().Value(),
+		"ordinary transform errors must not increment the interrupted counter")
 	assert.Equal(t, int64(0), failing.GetCounterDone().Value())
 }
 
@@ -155,10 +288,11 @@ func TestProcessor_noPauseController_runsImmediately(t *testing.T) {
 	assert.Equal(t, []int{1}, out)
 }
 
-// Bad path: cancelling the context while paused must unblock Run with an
-// error instead of hanging.
-func TestProcessor_pause_ctxCancel_unblocks(t *testing.T) {
+// Bad path: cancelling the context while paused interrupts Run without
+// classifying the deliberate cancellation as a transform failure.
+func TestProcessor_pause_ctxCancel_isInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	blocked, err := New(
 		"pause-cancel-audit",
@@ -172,23 +306,128 @@ func TestProcessor_pause_ctxCancel_unblocks(t *testing.T) {
 	pc := shared.NewPauseController()
 	pc.Pause()
 
+	paused := signalProcessorPause(blocked)
 	pausedCtx := shared.ContextWithPause(ctx, pc)
 
-	done := make(chan error, 1)
+	type runResult struct {
+		output []int
+		err    error
+	}
+
+	done := make(chan runResult, 1)
 
 	go func() {
-		_, err := blocked.Run(pausedCtx, []int{1})
-		done <- err
+		output, err := blocked.Run(pausedCtx, []int{1})
+		done <- runResult{output: output, err: err}
 	}()
 
-	// Give Run a moment to enter the pause loop, then cancel.
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-paused:
+	case <-time.After(3 * time.Second):
+		t.Fatal("processor did not enter the paused lifecycle before cancellation")
+	}
+
 	cancel()
 
 	select {
-	case err := <-done:
-		assert.Error(t, err, "a cancelled context while paused must surface an error")
+	case result := <-done:
+		assert.Nil(t, result.output)
+		require.Error(t, result.err)
+		assert.ErrorIs(t, result.err, context.Canceled,
+			"pause cancellation must remain unwrappable as context.Canceled")
+		assert.Equal(t, status.Interrupted.String(), blocked.GetStatus().Value(),
+			"pause cancellation must set interrupted status")
+		assert.Equal(t, int64(1), blocked.GetCounterInterrupted().Value(),
+			"pause cancellation must increment the interrupted counter")
+		assert.Equal(t, int64(0), blocked.GetCounterFailed().Value(),
+			"pause cancellation must not increment the failed counter")
 	case <-time.After(3 * time.Second):
 		t.Fatal("Run did not unblock after context cancellation while paused")
 	}
+}
+
+// Bad path: a deadline reached while paused interrupts Run without classifying
+// it as a transform failure.
+func TestProcessor_pause_ctxDeadline_isInterrupted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	blocked, err := New(
+		"pause-deadline-audit",
+		"never actually runs",
+		func(ctx context.Context, processingData []int) ([]int, error) {
+			return processingData, nil
+		},
+	)
+	require.NoError(t, err)
+
+	pc := shared.NewPauseController()
+	pc.Pause()
+
+	paused := signalProcessorPause(blocked)
+	pausedCtx := shared.ContextWithPause(ctx, pc)
+
+	type runResult struct {
+		output []int
+		err    error
+	}
+
+	done := make(chan runResult, 1)
+
+	go func() {
+		output, err := blocked.Run(pausedCtx, []int{1})
+		done <- runResult{output: output, err: err}
+	}()
+
+	select {
+	case <-paused:
+	case <-ctx.Done():
+		t.Fatal("processor did not enter the paused lifecycle before its deadline")
+	}
+
+	select {
+	case result := <-done:
+		assert.Nil(t, result.output)
+		require.Error(t, result.err)
+		assert.ErrorIs(t, result.err, context.DeadlineExceeded,
+			"pause deadline must remain unwrappable as context.DeadlineExceeded")
+		assert.Equal(t, status.Interrupted.String(), blocked.GetStatus().Value(),
+			"pause deadline must set interrupted status")
+		assert.Equal(t, int64(1), blocked.GetCounterInterrupted().Value(),
+			"pause deadline must increment the interrupted counter")
+		assert.Equal(t, int64(0), blocked.GetCounterFailed().Value(),
+			"pause deadline must not increment the failed counter")
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not unblock after its context deadline while paused")
+	}
+}
+
+// Completion callback time is not part of the transform duration.
+func TestProcessor_durationExcludesOnFinished(t *testing.T) {
+	const (
+		callbackDelay = 500 * time.Millisecond
+		maxDuration   = 250 * time.Millisecond
+	)
+
+	callbackCalls := 0
+
+	p, err := New(
+		"duration-excludes-onfinished-processor",
+		"records only transform duration",
+		func(ctx context.Context, in []int) ([]int, error) {
+			return in, nil
+		},
+		WithOnFinished(func(ctx context.Context, p IProcessor[int], in []int, out []int) {
+			callbackCalls++
+			time.Sleep(callbackDelay)
+		}),
+	)
+	require.NoError(t, err)
+
+	_, err = p.Run(context.Background(), []int{1})
+	require.NoError(t, err)
+	require.Equal(t, 1, callbackCalls, "OnFinished must run exactly once")
+
+	duration := time.Duration(p.GetDuration().Value()) * time.Millisecond
+	require.Less(t, duration, maxDuration, "duration must exclude completion callback")
 }

@@ -3,7 +3,7 @@ package customapm
 import (
 	"fmt"
 
-	"github.com/thalesfsp/etler/v3/internal/logging"
+	"github.com/thalesfsp/etler/v4/internal/logging"
 	"github.com/thalesfsp/sypl/v2"
 	"github.com/thalesfsp/sypl/v2/level"
 	"github.com/thalesfsp/validation"
@@ -13,7 +13,7 @@ import (
 // Vars, consts, and types.
 //////
 
-// Logger satisfies `apm.Logger` interface.
+// Logger adapts the application logger to the Elastic APM logger interface.
 type Logger struct {
 	s sypl.ISypl `json:"-" validate:"required"`
 }
@@ -22,7 +22,7 @@ type Logger struct {
 // Methods.
 //////
 
-// Errorf implements required `Errorf` interface.
+// Errorf logs a formatted APM error.
 func (l *Logger) Errorf(format string, args ...interface{}) {
 	l.s.PrintlnWithOptions(
 		level.Error,
@@ -31,7 +31,7 @@ func (l *Logger) Errorf(format string, args ...interface{}) {
 	)
 }
 
-// Debugf implements required  `Debugf` interface.
+// Debugf logs a formatted APM debug message.
 func (l *Logger) Debugf(format string, args ...interface{}) {
 	l.s.PrintlnWithOptions(
 		level.Debug,

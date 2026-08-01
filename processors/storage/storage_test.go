@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/thalesfsp/dal/v2/memory"
-	"github.com/thalesfsp/etler/v3/processor"
+	"github.com/thalesfsp/etler/v4/processor"
 	"github.com/thalesfsp/params/v2/list"
 )
 
@@ -38,10 +38,12 @@ func TestNew(t *testing.T) {
 		memoryStorage,
 		1,
 		"test-",
-		processor.WithOnFinished(
-			func(ctx context.Context, c processor.IProcessor[Test], originalIn []Test, processedOut []Test) {
-				buf.WriteString(c.GetName() + " finished")
-			}),
+		WithProcessorOptions(
+			processor.WithOnFinished(
+				func(ctx context.Context, c processor.IProcessor[Test], originalIn []Test, processedOut []Test) {
+					buf.WriteString(c.GetName() + " finished")
+				}),
+		),
 	)
 	assert.NoError(t, err)
 
