@@ -16,7 +16,7 @@ func ExampleNewFile() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	path := filepath.Join(dir, "checkpoints.json")
 

@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - [ ] Create and Update should allow to pass more than one object per time (Bulk Create and Update)
 
+## [4.1.0] - 2026-11-16
+
+Chunked runs with per-chunk checkpoints, continue-on-error, and resume. All
+additions are opt-in; `Pipeline.Run` and every existing API are unchanged.
+
+### Added
+
+- **`pipeline.RunChunks`** runs a pipeline once per chunk, in order, and saves
+  each chunk's outcome to a checkpoint store before the next chunk starts, so a
+  crash keeps every finished chunk. `ChunkOptions.ContinueOnError` records a
+  failed chunk and runs the rest instead of stopping. Calling it again with the
+  same run ID skips chunks already done, so only failed and missing chunks run.
+  `ChunkOptions.Commit` persists a chunk's output before it is checkpointed;
+  `ChunkOptions.Key` names chunks when the index is not a stable identity. It
+  returns one `ChunkResult` per chunk reached (`done`, `failed`, or `skipped`)
+  and the joined chunk errors.
+- **`pipeline.Chunk`** splits a slice into chunks of at most N items.
+- **`checkpoint` package:** the `Store` interface (`Load`, `Save`), the
+  `Record` type with status, error, and attempt count, and two stores:
+  `NewMemory` and `NewFile`, a JSON file replaced atomically on every save.
+
 ## [4.0.0] - 2026-07-30
 
 Major release. Module path is now `github.com/thalesfsp/etler/v4`.

@@ -83,11 +83,9 @@ func appendCommit(sink string) func(context.Context, string, []task.Task[string,
 		if err != nil {
 			return err
 		}
-		defer f.Close()
-
 		_, err = fmt.Fprintf(f, "%s %d %s\n", key, len(tasks[0].ProcessingData), tasks[0].ProcessingData[0])
 
-		return err
+		return errors.Join(err, f.Close())
 	}
 }
 
@@ -97,7 +95,8 @@ func readSink(t *testing.T, sink string) []string {
 
 	f, err := os.Open(sink)
 	require.NoError(t, err)
-	defer f.Close()
+
+	defer func() { require.NoError(t, f.Close()) }()
 
 	var keys []string
 
