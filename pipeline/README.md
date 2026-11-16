@@ -48,6 +48,8 @@ When the `Run` method is called on a pipeline, it iterates through the stages, p
 
 15. **Typed Errors**: The package utilizes typed errors, providing more context and facilitating error handling and debugging.
 
+16. **Chunked Runs**: `RunChunks` runs the pipeline once per chunk (see `Chunk`), checkpoints every chunk's outcome in a `checkpoint.Store`, can continue past a failed chunk (`ChunkOptions.ContinueOnError`), and on a rerun with the same run ID processes only the failed or missing chunks.
+
 ## Architectural Modularity and Flexibility
 
 The pipeline package is designed with architectural modularity and flexibility in mind. It leverages Go's interfaces and generic types to provide a highly extensible and customizable pipeline framework.

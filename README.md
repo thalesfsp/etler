@@ -30,8 +30,12 @@ items concurrently and waits for all async processors before it returns.
   a nondeterministic `MarshalJSON` changes the content-derived key. The storage
   backend's `Create` semantics determine whether a repeated key overwrites,
   rejects, or otherwise handles the write.
-- **Checked examples:** the repository has 18 runnable examples across 12
-  packages: `etler`, `converter`, `converters/csv`,
+- **Chunked runs that survive failures:** `pipeline.RunChunks` runs a pipeline
+  once per chunk, checkpoints each chunk's outcome, can continue past a failed
+  chunk, and on a rerun processes only the failed or missing chunks. See
+  [Chunked runs](#chunked-runs-checkpoint-continue-resume).
+- **Checked examples:** the repository has 20 runnable examples across 13
+  packages: `etler`, `checkpoint`, `converter`, `converters/csv`,
   `converters/passthru`, `converters/storage`, `loader`, `loaders/csv`,
   `pipeline`, `processor`, `processors/storage`, `stage`, and `task`.
 
@@ -104,6 +108,46 @@ func main() {
 Browse the examples on
 [pkg.go.dev](https://pkg.go.dev/github.com/thalesfsp/etler/v4) or run
 `go test -run Example ./...`.
+
+## Chunked runs: checkpoint, continue, resume
+
+`Pipeline.Run` processes its whole input in one pass and stops at the first
+error. For long jobs that call a slow or flaky service per batch, split the
+input and run it with `pipeline.RunChunks`:
+
+```go
+chunks, _ := pipeline.Chunk(lines, 500)
+
+store, _ := checkpoint.NewFile("nightly-checkpoints.json")
+
+results, err := pipeline.RunChunks(ctx, flow, "nightly-2026-11-16", chunks,
+	pipeline.ChunkOptions[string, Card]{
+		Store:           store, // nil: in memory, nothing survives the call
+		ContinueOnError: true,  // false (default): stop at the first failed chunk
+		Commit:          saveCards, // persist a chunk's output; must be idempotent
+	})
+```
+
+- **Checkpoint.** Each chunk's outcome (`done` or `failed`, with its error and
+  attempt count) is saved under the run ID before the next chunk starts. A
+  crash loses at most the chunk in flight.
+- **Continue on error.** With `ContinueOnError`, a failed chunk is recorded and
+  the run moves on; the returned error joins every chunk failure. A store
+  error or a canceled context still stops the run.
+- **Resume.** Calling `RunChunks` again with the same run ID skips every chunk
+  the store holds as done, so only failed and missing chunks run. Use a new run
+  ID to start over.
+- **Keys.** A chunk is identified by its index unless `ChunkOptions.Key` names
+  it. Keys must be stable across reruns; derive them from the content when the
+  input can change between runs.
+- **At-least-once.** A chunk is checkpointed as done only after `Commit`
+  returns. A crash between the two reruns that chunk, so `Commit` must be
+  idempotent.
+
+`checkpoint.Store` is a two-method interface (`Load`, `Save`). The library ships
+`checkpoint.NewMemory` and `checkpoint.NewFile` (single writer, survives process
+crashes, not power loss); supply your own for a database. `Pipeline.Run` and
+every other existing API are unchanged.
 
 ## Concurrency contract
 
