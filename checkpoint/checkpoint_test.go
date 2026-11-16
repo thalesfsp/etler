@@ -163,6 +163,64 @@ func TestFile_errors(t *testing.T) {
 		assert.Contains(t, err.Error(), "write checkpoint file")
 	})
 
+	t.Run("failed temp write keeps the previous file", func(t *testing.T) {
+		path := filepath.Join(dir, "atomic.json")
+
+		store, err := NewFile(path)
+		require.NoError(t, err)
+		require.NoError(t, store.Save(ctx, "run", Record{Key: "0", Status: StatusDone}))
+
+		before, err := os.ReadFile(path)
+		require.NoError(t, err)
+
+		// The temporary file cannot be created, so a direct write to path is
+		// the only way the save could succeed.
+		require.NoError(t, os.Mkdir(path+".tmp", 0o700))
+
+		err = store.Save(ctx, "run", Record{Key: "1", Status: StatusDone})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "write checkpoint file")
+
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, before, after)
+	})
+
+	t.Run("unencodable record keeps the previous file", func(t *testing.T) {
+		path := filepath.Join(dir, "encode.json")
+
+		store, err := NewFile(path)
+		require.NoError(t, err)
+		require.NoError(t, store.Save(ctx, "run", Record{Key: "0", Status: StatusDone}))
+
+		before, err := os.ReadFile(path)
+		require.NoError(t, err)
+
+		err = store.Save(ctx, "run", Record{Key: "1", UpdatedAt: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "encode checkpoint file")
+
+		after, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, before, after)
+	})
+
+	t.Run("invalid UTF-8", func(t *testing.T) {
+		path := filepath.Join(dir, "utf8.json")
+
+		store, err := NewFile(path)
+		require.NoError(t, err)
+
+		for _, tc := range []struct{ run, key string }{{"run-\xff", "0"}, {"run", "\xff"}} {
+			err := store.Save(ctx, tc.run, Record{Key: tc.key, Status: StatusDone})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "UTF-8")
+		}
+
+		_, err = os.Stat(path)
+		assert.ErrorIs(t, err, os.ErrNotExist, "nothing is written")
+	})
+
 	t.Run("null file", func(t *testing.T) {
 		path := filepath.Join(dir, "null.json")
 		require.NoError(t, os.WriteFile(path, []byte("null"), 0o600))

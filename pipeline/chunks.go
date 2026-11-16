@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/thalesfsp/customerror/v2"
 	"github.com/thalesfsp/etler/v4/checkpoint"
@@ -71,12 +72,16 @@ func Chunk[T any](data []T, size int) ([][]T, error) {
 		return nil, customerror.NewInvalidError("chunk size", customerror.WithField("size", size))
 	}
 
-	chunks := make([][]T, 0, (len(data)+size-1)/size)
+	// Advance by the remaining length, not start+size, so a huge size cannot
+	// overflow.
+	chunks := make([][]T, 0, len(data)/size+1)
 
-	for start := 0; start < len(data); start += size {
-		end := min(start+size, len(data))
+	for start := 0; start < len(data); {
+		end := start + min(size, len(data)-start)
 
 		chunks = append(chunks, data[start:end:end])
+
+		start = end
 	}
 
 	return chunks, nil
@@ -96,6 +101,9 @@ func Chunk[T any](data []T, size int) ([][]T, error) {
 // before any chunk runs, a Save error right after the chunk it was recording.
 // Save calls ignore ctx's cancellation so an interrupted run still records
 // what it finished.
+//
+// Calls sharing a run ID and store are not coordinated with each other: run
+// them one at a time, or both may run the same chunk.
 func RunChunks[ProcessedData, ConvertedOut any](
 	ctx context.Context,
 	p IPipeline[ProcessedData, ConvertedOut],
@@ -109,6 +117,12 @@ func RunChunks[ProcessedData, ConvertedOut any](
 
 	if runID == "" {
 		return nil, customerror.NewRequiredError("runID")
+	}
+
+	// Stores may normalize invalid UTF-8 (JSON does), which could merge two
+	// keys and make resume skip a chunk that never finished.
+	if !utf8.ValidString(runID) {
+		return nil, customerror.NewInvalidError("runID: not valid UTF-8")
 	}
 
 	keys, err := chunkKeys(chunks, opts.Key)
@@ -206,8 +220,11 @@ func chunkKeys[ProcessedData any](
 			key = keyOf(index, chunk)
 		}
 
-		if key == "" {
-			return nil, customerror.NewInvalidError("chunk key", customerror.WithField("index", index))
+		if key == "" || !utf8.ValidString(key) {
+			return nil, customerror.NewInvalidError(
+				"chunk key: empty or not valid UTF-8",
+				customerror.WithField("index", index),
+			)
 		}
 
 		if first, ok := seen[key]; ok {

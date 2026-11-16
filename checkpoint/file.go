@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/thalesfsp/customerror/v2"
 )
@@ -51,6 +52,11 @@ func (f *File) Load(_ context.Context, runID string) (map[string]Record, error) 
 
 // Save inserts or replaces record under runID and rewrites the file.
 func (f *File) Save(_ context.Context, runID string, record Record) error {
+	// JSON replaces invalid UTF-8 with U+FFFD, which could merge two keys.
+	if !utf8.ValidString(runID) || !utf8.ValidString(record.Key) {
+		return customerror.NewInvalidError("runID or key: not valid UTF-8")
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -65,8 +71,10 @@ func (f *File) Save(_ context.Context, runID string, record Record) error {
 
 	runs[runID][record.Key] = record
 
-	// Marshalling maps of string-keyed records with plain fields cannot fail.
-	data, _ := json.MarshalIndent(runs, "", "  ")
+	data, err := json.MarshalIndent(runs, "", "  ")
+	if err != nil {
+		return customerror.NewFailedToError("encode checkpoint file", customerror.WithError(err))
+	}
 
 	tmp := f.path + ".tmp"
 

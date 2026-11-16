@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 
@@ -124,6 +125,11 @@ func TestChunk(t *testing.T) {
 		require.Error(t, err, "size %d", size)
 		assert.Contains(t, err.Error(), "chunk size")
 	}
+
+	// A size larger than any length must not overflow.
+	huge, err := Chunk([]int{1, 2}, math.MaxInt)
+	require.NoError(t, err)
+	assert.Equal(t, [][]int{{1, 2}}, huge)
 
 	// Appending to one chunk must not overwrite the next one's items.
 	chunks[0] = append(chunks[0], 99)
@@ -390,6 +396,8 @@ func TestRunChunks_invalidInput(t *testing.T) {
 		{name: "empty run ID", p: p, run: "", want: "runID"},
 		{name: "empty key", p: p, run: "run", key: func(int, []int) string { return "" }, want: "chunk key"},
 		{name: "duplicate key", p: p, run: "run", key: func(int, []int) string { return "same" }, want: "duplicate"},
+		{name: "invalid UTF-8 run ID", p: p, run: "run-\xff", want: "runID"},
+		{name: "invalid UTF-8 key", p: p, run: "run", key: func(i int, _ []int) string { return []string{"\uFFFD", "\xff"}[i] }, want: "chunk key"},
 	}
 
 	for _, tt := range tests {
